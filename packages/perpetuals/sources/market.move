@@ -264,35 +264,8 @@ public(package) fun try_update_funding(
 ) {
     let (index_price, index_twap_price) = base_oracle_price_and_twap_price(params, oracle, clock);
     assert_index_twap_divergence_within_limit(params, index_price, index_twap_price);
-    // Without a book price (empty side), the index price stands in for it.
-    let (actual_book_price, clipped_book_price) = if (book_price_opt.is_none()) {
-        (index_price, index_price)
-    } else {
-        let book_price = *book_price_opt.borrow();
-        (book_price, clip_max_book_index_spread(params, book_price, index_price))
-    };
-
     let now = clock.timestamp_ms();
-    if (now >= state.premium_twap_last_upd_ms + params.twap_params.premium_twap_frequency_ms) {
-        state.update_premium_twap(
-            params,
-            index_price,
-            actual_book_price,
-            clipped_book_price,
-            now,
-            ch_id,
-        )
-    };
-    if (now >= state.spread_twap_last_upd_ms + params.twap_params.spread_twap_frequency_ms) {
-        state.update_spread_twap(
-            params,
-            index_price,
-            actual_book_price,
-            clipped_book_price,
-            now,
-            ch_id,
-        )
-    };
+    update_twaps(params, state, index_price, book_price_opt, now, ch_id);
     try_update_fundings(params, state, now, ch_id)
 }
 
@@ -306,14 +279,25 @@ public(package) fun try_update_twaps(
 ) {
     let (index_price, index_twap_price) = base_oracle_price_and_twap_price(params, oracle, clock);
     assert_index_twap_divergence_within_limit(params, index_price, index_twap_price);
+    update_twaps(params, state, index_price, book_price_opt, clock.timestamp_ms(), ch_id)
+}
+
+/// Samples the premium and spread TWAPs whose sampling interval has elapsed. Without a book
+/// price (an empty side), the index price stands in for it.
+fun update_twaps(
+    params: &MarketParams,
+    state: &mut MarketState,
+    index_price: u256,
+    book_price_opt: Option<u256>,
+    now: u64,
+    ch_id: &ID,
+) {
     let (actual_book_price, clipped_book_price) = if (book_price_opt.is_none()) {
         (index_price, index_price)
     } else {
         let book_price = *book_price_opt.borrow();
         (book_price, clip_max_book_index_spread(params, book_price, index_price))
     };
-
-    let now = clock.timestamp_ms();
     if (now >= state.premium_twap_last_upd_ms + params.twap_params.premium_twap_frequency_ms) {
         state.update_premium_twap(
             params,
@@ -365,7 +349,7 @@ public(package) fun set_core_params(
     params.core_params.lot_size = lot_size;
     params.core_params.tick_size = tick_size;
     params.core_params.collateral_haircut = collateral_haircut;
-    events::emit_set_core_params(*ch_id, lot_size, tick_size, collateral_haircut)
+    events::set_core_params(*ch_id, lot_size, tick_size, collateral_haircut)
 }
 
 public(package) fun update_margin_ratios(
@@ -420,7 +404,7 @@ public(package) fun set_fee_params(
     params.fees_params.liquidation_fee = liquidation_fee;
     params.fees_params.insurance_fund_fee = insurance_fund_fee;
     params.fees_params.priority_taker_fee = priority_taker_fee;
-    events::emit_set_fee_params(
+    events::set_fee_params(
         *ch_id,
         maker_fee,
         taker_fee,
@@ -477,7 +461,7 @@ public(package) fun set_twap_params(
     params.twap_params.premium_twap_period_ms = premium_twap_period_ms;
     params.twap_params.spread_twap_frequency_ms = spread_twap_frequency_ms;
     params.twap_params.spread_twap_period_ms = spread_twap_period_ms;
-    events::emit_set_twap_params(
+    events::set_twap_params(
         *ch_id,
         funding_frequency_ms,
         funding_period_ms,
@@ -593,7 +577,7 @@ public(package) fun set_risk_limit_params(
     params.limits_params.max_index_twap_divergence = max_index_twap_divergence;
     params.limits_params.max_bad_debt = max_bad_debt;
     params.limits_params.max_socialize_losses_mr_decrease = max_socialize_losses_mr_decrease;
-    events::emit_set_risk_limit_params(
+    events::set_risk_limit_params(
         *ch_id,
         min_order_usd_value,
         max_pending_orders,
@@ -624,7 +608,7 @@ public(package) fun set_base_oracle_params(
     params.core_params.base_storage_id = storage_id;
     params.core_params.base_source_id = source_id;
     params.core_params.base_pfs_tolerance = oracle_tolerance;
-    events::emit_set_base_oracle_params(*ch_id, storage_id, source_id, oracle_tolerance)
+    events::set_base_oracle_params(*ch_id, storage_id, source_id, oracle_tolerance)
 }
 
 public(package) fun set_collateral_oracle_params(
@@ -647,7 +631,7 @@ public(package) fun set_collateral_oracle_params(
     params.core_params.collateral_storage_id = storage_id;
     params.core_params.collateral_source_id = source_id;
     params.core_params.collateral_pfs_tolerance = oracle_tolerance;
-    events::emit_set_collateral_oracle_params(*ch_id, storage_id, source_id, oracle_tolerance)
+    events::set_collateral_oracle_params(*ch_id, storage_id, source_id, oracle_tolerance)
 }
 
 /// The bad debt policy is declared at creation and never defaulted: `max_bad_debt` is the most
@@ -753,13 +737,7 @@ public(package) fun try_update_fundings_and_twaps(
     book_price: u256,
     ch_id: &ID
 ) {
-    let clipped_book_price = clip_max_book_index_spread(params, book_price, index_price);
-    if (now >= state.premium_twap_last_upd_ms + params.twap_params.premium_twap_frequency_ms) {
-        state.update_premium_twap(params, index_price, book_price, clipped_book_price, now, ch_id)
-    };
-    if (now >= state.spread_twap_last_upd_ms + params.twap_params.spread_twap_frequency_ms) {
-        state.update_spread_twap(params, index_price, book_price, clipped_book_price, now, ch_id)
-    };
+    update_twaps(params, state, index_price, option::some(book_price), now, ch_id);
     try_update_fundings(params, state, now, ch_id)
 }
 
@@ -799,7 +777,7 @@ public(package) fun add_bad_debt_to_market(
             delta,
         )
     };
-    events::emit_socialized_bad_debt(
+    events::socialized_bad_debt(
         *ch_id,
         bad_debt_usd,
         delta,
@@ -863,7 +841,7 @@ public(package) fun try_update_fundings(
     state.cum_funding_rate_long = ifixed::add(state.cum_funding_rate_long, funding_rate);
     state.cum_funding_rate_short = ifixed::add(state.cum_funding_rate_short, funding_rate);
     state.funding_last_upd_ms = now;
-    events::emit_updated_funding(
+    events::updated_funding(
         *ch_id,
         state.cum_funding_rate_long,
         state.cum_funding_rate_short,
@@ -888,7 +866,7 @@ fun update_premium_twap(
         params.twap_params.premium_twap_period_ms,
     );
     state.premium_twap_last_upd_ms = now;
-    events::emit_updated_premium_twap(
+    events::updated_premium_twap(
         *ch_id,
         actual_book_price,
         clipped_book_price,
@@ -915,7 +893,7 @@ fun update_spread_twap(
         params.twap_params.spread_twap_period_ms,
     );
     state.spread_twap_last_upd_ms = now;
-    events::emit_updated_spread_twap(
+    events::updated_spread_twap(
         *ch_id,
         actual_book_price,
         clipped_book_price,
@@ -1042,14 +1020,6 @@ public fun collateral_source_id(market_params: &MarketParams): u16 {
     market_params.core_params.collateral_source_id
 }
 
-public fun base_pfs_tolerance(market_params: &MarketParams): u64 {
-    market_params.core_params.base_pfs_tolerance
-}
-
-public fun collateral_pfs_tolerance(market_params: &MarketParams): u64 {
-    market_params.core_params.collateral_pfs_tolerance
-}
-
 public fun min_order_usd_value(market_params: &MarketParams): u256 {
     market_params.limits_params.min_order_usd_value
 }
@@ -1100,26 +1070,6 @@ public fun scaling_factor(market_params: &MarketParams): u256 {
     market_params.core_params.scaling_factor
 }
 
-public fun base_oracle_price(
-    market_params: &MarketParams,
-    oracle: &PriceFeedStorage,
-    clock: &Clock
-): u256 {
-    assert!(
-        oracle.storage_id() == market_params.core_params.base_storage_id,
-        EInvalidBasePriceFeedStorage,
-    );
-    let (price, price_timestamp_ms) = oracle
-        .price_feed(market_params.core_params.base_source_id)
-        .price_and_timestamp_ms();
-    let now = clock.timestamp_ms();
-    // Stale price: older than the tolerance window (saturating at time zero).
-    if (now - now.min(market_params.core_params.base_pfs_tolerance) > price_timestamp_ms) {
-        abort EBadIndexPrice
-    };
-    (price as u256)
-}
-
 public fun base_oracle_price_and_twap_price(
     market_params: &MarketParams,
     oracle: &PriceFeedStorage,
@@ -1166,10 +1116,6 @@ public fun cum_funding_rates(market_state: &MarketState): (u256, u256) {
 
 public fun funding_last_upd_ms(market_state: &MarketState): u64 {
     market_state.funding_last_upd_ms
-}
-
-public fun twap_last_upd_ms(market_state: &MarketState): (u64, u64) {
-    (market_state.premium_twap_last_upd_ms, market_state.spread_twap_last_upd_ms)
 }
 
 public fun premium_twap(market_state: &MarketState): u256 {

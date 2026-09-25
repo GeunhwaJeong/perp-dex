@@ -245,7 +245,7 @@ fun execute_adl_<T>(
         };
         position.add_to_collateral(collateral_share);
         remaining_collateral = ifixed::sub(remaining_collateral, collateral_share);
-        events::emit_performed_adl(
+        events::performed_adl(
             ch_id,
             bad_debt_account_id,
             size_reduced,

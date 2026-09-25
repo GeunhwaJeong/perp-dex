@@ -88,7 +88,7 @@ public fun create_account<T>(
     let share_policy = AccountSharePolicy(account_obj_id);
     let admin_cap = authority::create_account_admin_cap(&mut account.id, account_obj_id);
 
-    events::emit_created_account<T>(account_obj_id, ctx.sender(), account_id);
+    events::created_account<T>(account_obj_id, ctx.sender(), account_id);
     (account, share_policy, admin_cap)
 }
 
@@ -174,7 +174,7 @@ public fun withdraw_collateral<T>(
     };
 
     let collateral = coin::take(&mut account.collateral, amount, ctx);
-    events::emit_withdrew_collateral<T>(account.account_id, amount);
+    events::withdrew_collateral<T>(account.account_id, amount);
     collateral
 }
 
@@ -239,7 +239,7 @@ public fun deposit_collateral<T, ADMIN_OR_ASSISTANT>(
     };
 
     account.collateral.join(coin.into_balance());
-    events::emit_deposited_collateral<T>(account.account_id, amount)
+    events::deposited_collateral<T>(account.account_id, amount)
 }
 
 public fun receive_from_account<T, ADMIN_OR_ASSISTANT, Obj: key + store>(

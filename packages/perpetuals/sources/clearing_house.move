@@ -91,6 +91,7 @@ const ENotFrozen: u64 = 55;
 const EInvalidResumeVersion: u64 = 56;
 const EBelowMmrCannotRestOrder: u64 = 57;
 const EInvalidOrderPrice: u64 = 3900;
+const EOrderNotFound: u64 = 58;
 
 // === Types ===
 
@@ -282,10 +283,6 @@ public fun mark_price<T>(
     market_state.calculate_mark_price(market_params, index_twap_price, book_price, now)
 }
 
-public fun create_client_order_id(client_order_id: u64): Option<u64> {
-    option::some(client_order_id)
-}
-
 public fun market_vault<T>(ch: &ClearingHouse<T>): &Vault<T> {
     df::borrow(&ch.id, keys::market_vault())
 }
@@ -349,7 +346,7 @@ public(package) fun settle_position_funding_and_emit(
         mkt_funding_rate_short,
     );
     if (settled) {
-        events::emit_settled_funding(
+        events::settled_funding(
             *ch_id,
             account_id,
             collateral_change_usd,
@@ -450,17 +447,6 @@ public fun summary<T>(
     &session.session_summary
 }
 
-public fun tick_rounded_liquidation_mark_price<T>(
-    hot_potato: &SessionHotPotato<T>,
-): u64 {
-    let tick_size = hot_potato.clearing_house.market_params.tick_size();
-    let liquidation_price = ifixed::div(
-        hot_potato.session_summary.quote_liquidated,
-        hot_potato.session_summary.base_liquidated,
-    );
-    ifixed::to_balance(liquidation_price, 1_000_000_000) / tick_size * tick_size
-}
-
 fun session_has_activity(
     session_summary: &SessionSummary,
     maker_events: &vector<FilledMakerOrder>,
@@ -530,12 +516,6 @@ public fun liquidated_size(
     session_summary: &SessionSummary,
 ): u64 {
     ifixed::to_balance(session_summary.base_liquidated, 1_000_000_000)
-}
-
-public fun liquidation_mark_price(
-    session_summary: &SessionSummary,
-): u256 {
-    ifixed::div(session_summary.quote_liquidated, session_summary.base_liquidated)
 }
 
 public fun liquidation_mark_price_b9(
@@ -687,7 +667,7 @@ entry fun upgrade_version<T, ADMIN_OR_ASSISTANT>(
 ) {
     registry.assert_admin_or_authorized_assistant_authority_cap(cap);
     assert!(clearing_house.version < 1, EInvalidVersionUpgradeValue);
-    events::emit_upgraded_version(clearing_house.id.to_inner(), 1);
+    events::upgraded_version(clearing_house.id.to_inner(), 1);
     clearing_house.version = 1
 }
 
@@ -699,7 +679,7 @@ public fun unfreeze_clearing_house<T>(
     let resume_version: u64 = df::remove(&mut clearing_house.id, keys::frozen_version());
     assert!(resume_version <= 1, EInvalidResumeVersion);
     clearing_house.version = resume_version;
-    events::emit_unfroze(clearing_house.id.to_inner(), resume_version)
+    events::unfroze(clearing_house.id.to_inner(), resume_version)
 }
 
 public fun freeze_clearing_house<T>(
@@ -713,7 +693,7 @@ public fun freeze_clearing_house<T>(
     df::add(&mut clearing_house.id, keys::frozen_version(), resume_version);
     // No package version accepts u64::MAX, so every versioned entry point fails until unfrozen.
     clearing_house.version = u64::max_value!();
-    events::emit_froze(clearing_house.id.to_inner(), resume_version, object::id(cap))
+    events::froze(clearing_house.id.to_inner(), resume_version, object::id(cap))
 }
 
 public fun pause_market<T, VendorKey, ADMIN_OR_ASSISTANT_OR_PAUSE_GUARDIAN>(
@@ -811,7 +791,7 @@ public fun close_market<VendorKey, ADMIN_OR_ASSISTANT, T>(
             enabled: false,
         },
     );
-    events::emit_closed_market(clearing_house.id.to_inner())
+    events::closed_market(clearing_house.id.to_inner())
 }
 
 public fun set_settlement_prices<VendorKey, ADMIN_OR_ASSISTANT, T>(
@@ -832,7 +812,7 @@ public fun set_settlement_prices<VendorKey, ADMIN_OR_ASSISTANT, T>(
     let prices = clearing_house.borrow_mut_settlement_prices();
     prices.base_price = option::some(base_settlement_price);
     prices.collateral_price = option::some(collateral_settlement_price);
-    events::emit_updated_settlement_prices(ch_id, base_settlement_price, collateral_settlement_price, false)
+    events::updated_settlement_prices(ch_id, base_settlement_price, collateral_settlement_price, false)
 }
 
 public fun enable_settlement<VendorKey, ADMIN_OR_ASSISTANT, T>(
@@ -852,7 +832,7 @@ public fun enable_settlement<VendorKey, ADMIN_OR_ASSISTANT, T>(
         ESettlementPricesNotSet,
     );
     prices.enabled = true;
-    events::emit_updated_settlement_prices(ch_id, *prices.base_price.borrow(), *prices.collateral_price.borrow(), true)
+    events::updated_settlement_prices(ch_id, *prices.base_price.borrow(), *prices.collateral_price.borrow(), true)
 }
 
 public fun set_fee_params<VendorKey, ADMIN_OR_ASSISTANT, T>(
@@ -1105,7 +1085,7 @@ public fun commit_margin_ratios_proposal<T>(
     clearing_house
         .market_params
         .update_margin_ratios(margin_ratio_initial, margin_ratio_maintenance);
-    events::emit_updated_margin_ratios(clearing_house.id.to_inner(), margin_ratio_initial, margin_ratio_maintenance)
+    events::updated_margin_ratios(clearing_house.id.to_inner(), margin_ratio_initial, margin_ratio_maintenance)
 }
 
 public fun donate_to_insurance_fund<T>(
@@ -1120,7 +1100,7 @@ public fun donate_to_insurance_fund<T>(
         .borrow_mut_market_vault()
         .insurance_fund_balance
         .join(coin.into_balance());
-    events::emit_donated_to_insurance_fund(ctx.sender(), clearing_house.id.to_inner(), amount, new_balance)
+    events::donated_to_insurance_fund(ctx.sender(), clearing_house.id.to_inner(), amount, new_balance)
 }
 
 public fun update_funding<T>(
@@ -1200,7 +1180,7 @@ public fun withdraw_fees<T, VendorKey>(
     let ch_id = clearing_house.id.to_inner();
     let vault = clearing_house.borrow_mut_market_vault();
     let fees_coin = coin::take(&mut vault.collateral_balance, fees, ctx);
-    events::emit_withdrew_fees(ctx.sender(), ch_id, fees, vault.collateral_balance.value());
+    events::withdrew_fees(ctx.sender(), ch_id, fees, vault.collateral_balance.value());
     fees_coin
 }
 
@@ -1257,7 +1237,7 @@ public fun withdraw_insurance_fund<T, VendorKey>(
     assert!(amount <= surplus, EInsufficientInsuranceSurplus);
     let withdrawn = coin::take(&mut vault.insurance_fund_balance, amount, ctx);
     let insurance_fund_balance_after = vault.insurance_fund_balance.value();
-    events::emit_withdrew_insurance_fund(ctx.sender(), clearing_house.id.to_inner(), amount, insurance_fund_balance_after);
+    events::withdrew_insurance_fund(ctx.sender(), clearing_house.id.to_inner(), amount, insurance_fund_balance_after);
     withdrawn
 }
 
@@ -1280,6 +1260,7 @@ public fun try_cancel_stale_orders<T, VendorKey>(
         order_ids,
         option::some(clock.timestamp_ms()),
         account_base,
+        0,
     )
 }
 
@@ -1299,7 +1280,7 @@ public fun allocate_collateral<T, ADMIN_OR_ASSISTANT>(
     clearing_house
         .borrow_mut_position(account.account_id())
         .add_to_collateral(ifixed::from_balance(amount, scaling_factor));
-    events::emit_allocated_collateral(clearing_house.id.to_inner(), account.account_id(), amount)
+    events::allocated_collateral(clearing_house.id.to_inner(), account.account_id(), amount)
 }
 
 public fun deallocate_collateral<T, ADMIN_OR_ASSISTANT>(
@@ -1356,7 +1337,7 @@ public fun create_market_position<T, ADMIN_OR_ASSISTANT>(
         account_id,
         position::create_position(funding_rate_long, funding_rate_short),
     );
-    events::emit_created_position(clearing_house.id.to_inner(), account_id, funding_rate_long, funding_rate_short)
+    events::created_position(clearing_house.id.to_inner(), account_id, funding_rate_long, funding_rate_short)
 }
 
 public fun set_position_initial_margin_ratio<T, ADMIN_OR_ASSISTANT>(
@@ -1375,7 +1356,7 @@ public fun set_position_initial_margin_ratio<T, ADMIN_OR_ASSISTANT>(
     clearing_house
         .borrow_mut_position(account_id)
         .set_initial_margin_ratio(initial_margin_ratio, market_imr);
-    events::emit_set_position_initial_margin_ratio(ch_id, account_id, initial_margin_ratio)
+    events::set_position_initial_margin_ratio(ch_id, account_id, initial_margin_ratio)
 }
 
 public fun cancel_orders<T, ADMIN_OR_ASSISTANT>(
@@ -1400,7 +1381,7 @@ public fun try_cancel_orders<T, ADMIN_OR_ASSISTANT>(
     account.assert_authority_cap_is_valid(cap);
     assert_package_version(clearing_house);
     assert_market_allows_order_cancellation(clearing_house);
-    try_cancel_orders_(clearing_house, account.account_id(), order_ids, option::none(), 0)
+    try_cancel_orders_(clearing_house, account.account_id(), order_ids, option::none(), 0, 0)
 }
 
 public fun close_position_at_settlement_prices<T>(
@@ -1475,7 +1456,7 @@ public fun close_position_at_settlement_prices<T>(
     account.borrow_mut_collateral().join(collateral_out);
     // Only long positions count towards open interest.
     clearing_house.market_state.add_to_open_interest(ifixed::neg(ifixed::max(base, 0)));
-    events::emit_closed_position_at_settlement_prices(ch_id, account_id, pnl, base, quote, collateral_amount, bad_debt)
+    events::closed_position_at_settlement_prices(ch_id, account_id, pnl, base, quote, collateral_amount, bad_debt)
 }
 
 public fun start_session<T, ADMIN_OR_ASSISTANT>(
@@ -1698,7 +1679,7 @@ public(package) fun end_session_<T>(
                 ifixed::max(base_before_liquidation, 0),
             ),
         );
-        events::emit_performed_liquidation(
+        events::performed_liquidation(
             ch_id,
             liqee_account_id.destroy_some(),
             account_id,
@@ -1711,7 +1692,7 @@ public(package) fun end_session_<T>(
         )
     };
     if (has_maker_fills) {
-        events::emit_filled_maker_orders(maker_events, book_price)
+        events::filled_maker_orders(maker_events, book_price)
     };
 
     // Taker fills are netted per side over the whole session and settled once.
@@ -1745,7 +1726,7 @@ public(package) fun end_session_<T>(
                 taker_fee_rate,
                 integrator_fee_rate,
             );
-        events::emit_filled_taker_order(
+        events::filled_taker_order(
             ch_id,
             account_id,
             taker_pnl,
@@ -1837,14 +1818,14 @@ public(package) fun end_session_<T>(
                 .borrow_mut_market_vault()
                 .collateral_balance
                 .join(account_collateral.split(collateral_amount));
-            events::emit_allocated_collateral(ch_id, account_id, collateral_amount)
+            events::allocated_collateral(ch_id, account_id, collateral_amount)
         } else {
             withdraw_vault_collateral(
                 clearing_house.borrow_mut_market_vault(),
                 account.borrow_mut_collateral(),
                 collateral_amount,
             );
-            events::emit_deallocated_collateral(ch_id, account_id, collateral_amount)
+            events::deallocated_collateral(ch_id, account_id, collateral_amount)
         }
     };
     if (integrator_info.is_some()) {
@@ -1866,7 +1847,7 @@ public(package) fun end_session_<T>(
             EMaxOpenInterestSurpassed,
         );
         let fees_accrued = market_state.fees_accrued();
-        events::emit_updated_open_interest_and_fees_accrued(ch_id, open_interest_after, fees_accrued)
+        events::updated_open_interest_and_fees_accrued(ch_id, open_interest_after, fees_accrued)
     };
     // Past the threshold, a position that grew may not exceed its share of open interest.
     if (
@@ -1887,7 +1868,7 @@ public(package) fun end_session_<T>(
 fun execute_limit_order<T>(
     hot_potato: &mut SessionHotPotato<T>,
     side: bool,
-    mut size: u64,
+    size: u64,
     price: u64,
     order_type: u64,
     client_order_id: Option<u64>,
@@ -1896,7 +1877,93 @@ fun execute_limit_order<T>(
 ): (u64, Option<u128>) {
     // 0 = good-till-cancel, 1 = fill-or-kill, 2 = post-only, 3 = immediate-or-cancel.
     assert!(order_type < 4, EInvalidOrderType);
+    assert!(
+        expiration_timestamp_ms.get_with_default(u64::max_value!()) > hot_potato.timestamp_ms,
+        EInvalidExpirationTimestamp,
+    );
+    // Order ids sort best price first on both sides: the price sits in the upper 64 bits and is
+    // bit-inverted for bids. `limit_key` is the taker's limit price in that encoding.
+    let limit_key = if (side) ((price ^ 0xFFFF_FFFF_FFFF_FFFF) as u128) else (price as u128);
+    let original_size = size;
+    let (mut size, too_many_unfilled_makers) =
+        match_taker(hot_potato, side, size, option::some(limit_key));
+    if (order_type == 1) {
+        assert!(size == 0, EFillOrKillOrderNotFilled)
+    };
+    if (order_type == 2) {
+        assert!(size == original_size, EPostOnlyOrderWouldMatch)
+    };
+    // Immediate-or-cancel orders, and orders that hit the unfilled-maker cap, never rest.
+    if (order_type == 3 || too_many_unfilled_makers) {
+        size = 0;
+    };
+    if (size == 0) {
+        return (0, option::none())
+    };
+
     let ch_id = hot_potato.clearing_house.id.to_inner();
+    let taker_account_id = hot_potato.account_id;
+    let (integrator_id, integrator_fee_rate) = if (hot_potato.integrator_info.is_some()) {
+        let info = hot_potato.integrator_info.borrow();
+        (option::some(info.integrator_id()), info.integrator_fee_b9())
+    } else {
+        (option::none(), 0)
+    };
+    let orderbook = &mut hot_potato.clearing_house.orderbook;
+    let order_id = orderbook.post_order(
+        taker_account_id,
+        side,
+        size,
+        price,
+        client_order_id,
+        reduce_only,
+        expiration_timestamp_ms,
+        hot_potato.integrator_info,
+    );
+    events::posted_order(
+        ch_id,
+        taker_account_id,
+        order_id,
+        client_order_id,
+        size,
+        reduce_only,
+        expiration_timestamp_ms,
+        integrator_id,
+        integrator_fee_rate,
+        hot_potato.mark_price,
+        orderbook.book_price(),
+    );
+    let posted_base = ifixed::from_balance(size, 1_000_000_000);
+    let summary = &mut hot_potato.session_summary;
+    summary.posted_orders = summary.posted_orders + 1;
+    if (side) {
+        summary.base_posted_ask = ifixed::add(summary.base_posted_ask, posted_base)
+    } else {
+        summary.base_posted_bid = ifixed::add(summary.base_posted_bid, posted_base)
+    };
+    (size, option::some(order_id))
+}
+
+fun execute_market_order<T>(
+    hot_potato: &mut SessionHotPotato<T>,
+    side: bool,
+    size: u64,
+) {
+    let (remaining, _) = match_taker(hot_potato, side, size, option::none());
+    assert!(remaining == 0, ENotEnoughLiquidity)
+}
+
+/// Fills `size` against the makers on the other side of the book, from the best price up to
+/// `limit_key` (an order id prefix; `none` takes any price). Returns the unfilled size and
+/// whether matching stopped because too many makers were canceled instead of filled: those
+/// (expired, self-trade, ...) cost gas without reducing the taker size, so matching stops after
+/// 200 of them.
+fun match_taker<T>(
+    hot_potato: &mut SessionHotPotato<T>,
+    side: bool,
+    mut size: u64,
+    limit_key: Option<u128>,
+): (u64, bool) {
     let market_params = &hot_potato.clearing_house.market_params;
     let market_state = &hot_potato.clearing_house.market_state;
     let maker_fee = market_params.maker_fee();
@@ -1906,9 +1973,8 @@ fun execute_limit_order<T>(
     let open_interest = market_state.open_interest();
     let (max_open_interest_threshold, max_open_interest_position_percent) =
         market_params.max_open_interest_position_params();
-    let is_ask = side;
     // Makers rest on the opposite side of the book (ask = true, bid = false).
-    let maker_side = if (is_ask) false else true;
+    let maker_side = !side;
     let (
         clearing_house_id,
         orderbook,
@@ -1930,26 +1996,14 @@ fun execute_limit_order<T>(
         hot_potato.collateral_price,
         hot_potato.mark_price,
     );
-    assert!(
-        expiration_timestamp_ms.get_with_default(u64::max_value!()) > timestamp_ms,
-        EInvalidExpirationTimestamp,
-    );
-    // Order ids sort best price first on both sides: the price sits in the upper 64 bits and is
-    // bit-inverted for bids. `limit_key` is the taker's limit price in that encoding.
-    let (maker_book, limit_key) = if (is_ask) {
-        (orderbook.borrow_mut_bids(), ((price ^ 0xFFFF_FFFF_FFFF_FFFF) as u128))
-    } else {
-        (orderbook.borrow_mut_asks(), (price as u128))
-    };
+    let maker_book = if (side) orderbook.borrow_mut_bids() else orderbook.borrow_mut_asks();
 
+    // Walk the maker side from the best price, one leaf of the ordered map at a time.
     let mut last_matched_order_id = 0;
     let mut drop_last_matched = true;
-    let mut reached_limit_price = false;
-    // Makers that are canceled instead of filled (expired, self-trade, ...) cost gas without
-    // reducing the taker size, so matching stops after too many of them.
+    let mut stop = false;
     let mut unfilled_makers: u64 = 0;
     let mut too_many_unfilled_makers = false;
-    let original_size = size;
     let mut leaf_ptr = maker_book.first_leaf_ptr();
     while (leaf_ptr != 0) {
         let leaf = maker_book.get_leaf_mut(leaf_ptr);
@@ -1958,8 +2012,8 @@ fun execute_limit_order<T>(
         let leaf_size = leaf.size();
         while (i < leaf_size) {
             let (maker_order_id, order) = leaf.elem_mut(i);
-            if (maker_order_id >> 64 > limit_key) {
-                reached_limit_price = true;
+            if (limit_key.is_some_and!(|limit| maker_order_id >> 64 > *limit)) {
+                stop = true;
                 break
             };
             last_matched_order_id = maker_order_id;
@@ -1992,27 +2046,21 @@ fun execute_limit_order<T>(
             hot_potato.total_open_interest =
                 ifixed::add(hot_potato.total_open_interest, open_interest_delta);
             maker_events.push_back(maker_event);
-            if (size == 0) break;
+            if (size == 0) {
+                stop = true;
+                break
+            };
             if (filled_size == 0) {
                 unfilled_makers = unfilled_makers + 1;
                 if (unfilled_makers == 200) {
                     too_many_unfilled_makers = true;
+                    stop = true;
                     break
                 }
             };
             i = i + 1;
         };
-        if (reached_limit_price || too_many_unfilled_makers || size == 0) break;
-    };
-    if (order_type == 1) {
-        assert!(size == 0, EFillOrKillOrderNotFilled)
-    };
-    if (order_type == 2) {
-        assert!(size == original_size, EPostOnlyOrderWouldMatch)
-    };
-    // Immediate-or-cancel orders, and orders that hit the unfilled-maker cap, never rest.
-    if (order_type == 3 || too_many_unfilled_makers) {
-        size = 0;
+        if (stop) break;
     };
 
     if (last_matched_order_id > 0) {
@@ -2030,156 +2078,7 @@ fun execute_limit_order<T>(
         };
         orderbook.set_best_price(maker_side, best_price)
     };
-
-    let mut posted_order_id = option::none();
-    if (size != 0) {
-        let (integrator_id, integrator_fee_rate) = if (hot_potato.integrator_info.is_some()) {
-            let info = hot_potato.integrator_info.borrow();
-            (option::some(info.integrator_id()), info.integrator_fee_b9())
-        } else {
-            (option::none(), 0)
-        };
-        let order_id = orderbook.post_order(
-            taker_account_id,
-            side,
-            size,
-            price,
-            client_order_id,
-            reduce_only,
-            expiration_timestamp_ms,
-            hot_potato.integrator_info,
-        );
-        posted_order_id = option::some(order_id);
-        events::emit_posted_order(
-            ch_id,
-            taker_account_id,
-            order_id,
-            client_order_id,
-            size,
-            reduce_only,
-            expiration_timestamp_ms,
-            integrator_id,
-            integrator_fee_rate,
-            mark_price,
-            orderbook.book_price(),
-        );
-        let posted_base = ifixed::from_balance(size, 1_000_000_000);
-        hot_potato.session_summary.posted_orders = hot_potato.session_summary.posted_orders + 1;
-        if (side) {
-            hot_potato.session_summary.base_posted_ask =
-                ifixed::add(hot_potato.session_summary.base_posted_ask, posted_base)
-        } else {
-            hot_potato.session_summary.base_posted_bid =
-                ifixed::add(hot_potato.session_summary.base_posted_bid, posted_base)
-        }
-    };
-    (size, posted_order_id)
-}
-
-fun execute_market_order<T>(
-    hot_potato: &mut SessionHotPotato<T>,
-    side: bool,
-    mut size: u64,
-) {
-    let market_params = &hot_potato.clearing_house.market_params;
-    let market_state = &hot_potato.clearing_house.market_state;
-    let maker_fee = market_params.maker_fee();
-    let (liquidation_fee, _) = market_params.liquidation_fee_rates();
-    let collateral_haircut = market_params.collateral_haircut();
-    let (funding_rate_long, funding_rate_short) = market_state.cum_funding_rates();
-    let open_interest = market_state.open_interest();
-    let (max_open_interest_threshold, max_open_interest_position_percent) =
-        market_params.max_open_interest_position_params();
-    let is_ask = side;
-    // Makers rest on the opposite side of the book (ask = true, bid = false).
-    let maker_side = if (is_ask) false else true;
-    let (
-        clearing_house_id,
-        orderbook,
-        session_summary,
-        taker_pending_cancelled,
-        maker_events,
-        taker_account_id,
-        timestamp_ms,
-        collateral_price,
-        mark_price,
-    ) = (
-        &mut hot_potato.clearing_house.id,
-        &mut hot_potato.clearing_house.orderbook,
-        &mut hot_potato.session_summary,
-        &mut hot_potato.taker_pending_cancelled,
-        &mut hot_potato.maker_events,
-        hot_potato.account_id,
-        hot_potato.timestamp_ms,
-        hot_potato.collateral_price,
-        hot_potato.mark_price,
-    );
-    let book_side = if (is_ask) orderbook.borrow_mut_bids() else orderbook.borrow_mut_asks();
-
-    // Walk the maker side from the best price, one leaf of the ordered map at a time.
-    let mut last_matched_order_id = 0;
-    let mut drop_last_matched = true;
-    let mut leaf_ptr = book_side.first_leaf_ptr();
-    while (leaf_ptr != 0) {
-        let leaf = book_side.get_leaf_mut(leaf_ptr);
-        leaf_ptr = leaf.next();
-        let mut i = 0;
-        let leaf_size = leaf.size();
-        while (i < leaf_size) {
-            let (maker_order_id, order) = leaf.elem_mut(i);
-            last_matched_order_id = maker_order_id;
-            let (filled_size, maker_order_done, maker_event, open_interest_delta) =
-                process_fill_maker(
-                    session_summary,
-                    clearing_house_id,
-                    maker_order_id,
-                    order,
-                    timestamp_ms,
-                    collateral_price,
-                    mark_price,
-                    maker_fee,
-                    liquidation_fee,
-                    collateral_haircut,
-                    funding_rate_long,
-                    funding_rate_short,
-                    open_interest,
-                    max_open_interest_threshold,
-                    max_open_interest_position_percent,
-                    taker_account_id,
-                    size,
-                    taker_pending_cancelled,
-                );
-            size = size - filled_size;
-            drop_last_matched = maker_order_done;
-            let (maker_fees, integrator_fees) = events::maker_and_integrator_fees(&maker_event);
-            hot_potato.total_fees =
-                ifixed::add(hot_potato.total_fees, ifixed::add(maker_fees, integrator_fees));
-            hot_potato.total_open_interest =
-                ifixed::add(hot_potato.total_open_interest, open_interest_delta);
-            maker_events.push_back(maker_event);
-            if (size == 0) break;
-            i = i + 1;
-        };
-        if (size == 0) break;
-    };
-    assert!(size == 0, ENotEnoughLiquidity);
-
-    if (last_matched_order_id > 0) {
-        // Every order before the last matched one is gone; the last one stays on the book only
-        // if it was partially filled.
-        book_side.batch_drop(last_matched_order_id, drop_last_matched);
-        let best_price = if (book_side.is_empty()) {
-            option::none()
-        } else {
-            let best_order_id = book_side.min_key();
-            // Order ids carry the price in their upper 64 bits, bit-inverted on the bid side.
-            option::some(
-                if (maker_side) ((best_order_id >> 64) as u64)
-                else ((best_order_id >> 64) as u64) ^ 0xFFFF_FFFF_FFFF_FFFF,
-            )
-        };
-        orderbook.set_best_price(maker_side, best_price)
-    }
+    (size, too_many_unfilled_makers)
 }
 
 fun process_fill_maker(
@@ -2605,7 +2504,7 @@ fun settle_liquidated_position<T>(
             scaling_factor,
         )
     };
-    events::emit_liquidated_position(
+    events::liquidated_position(
         *ch_id,
         liqee_account_id,
         hot_potato.account_id,
@@ -2739,7 +2638,7 @@ public(package) fun force_cancel_orders(
             orderbook.try_cancel_limit_order(account_id, order_id);
         if (canceled) {
             orders_canceled = orders_canceled + 1;
-            events::emit_canceled_order(
+            events::canceled_order(
                 ch_id,
                 account_id,
                 order_id,
@@ -3159,7 +3058,7 @@ public(package) fun deallocate_collateral_internal<T>(
         amount,
     );
     if (withdrawn != 0) {
-        events::emit_deallocated_collateral(ch_id, account_id, withdrawn)
+        events::deallocated_collateral(ch_id, account_id, withdrawn)
     };
     withdrawn
 }
@@ -3241,42 +3140,27 @@ public(package) fun start_session_<T>(
     }
 }
 
+/// Cancels every order in `order_ids`, all of which must exist and belong to `account_id`.
 fun cancel_orders_<T>(
     clearing_house: &mut ClearingHouse<T>,
     account_id: u64,
     order_ids: &vector<u128>,
     cancelation_reason: u8,
 ) {
-    let order_count = order_ids.length();
-    assert!(order_count != 0, EEmptyCancelOrderIds);
-    let ch_id = clearing_house.id.to_inner();
-    let orderbook = clearing_house.borrow_mut_orderbook();
-    let mut base_ask_canceled = 0;
-    let mut base_bid_canceled = 0;
-    order_ids.do_ref!(|order_id| {
-        let order_id = *order_id;
-        let (size, client_order_id) = orderbook.cancel_limit_order(account_id, order_id);
-        if (order_id < 1 << 127) {
-            base_ask_canceled = base_ask_canceled + (size as u128);
-        } else {
-            base_bid_canceled = base_bid_canceled + (size as u128);
-        };
-        events::emit_canceled_order(
-            ch_id,
-            account_id,
-            order_id,
-            client_order_id,
-            size,
-            cancelation_reason,
-            orderbook.book_price(),
-        );
-    });
-    let base_ask_canceled = ifixed::from_u128balance(base_ask_canceled, 1_000_000_000);
-    let base_bid_canceled = ifixed::from_u128balance(base_bid_canceled, 1_000_000_000);
-    let position = clearing_house.borrow_mut_position(account_id);
-    position.sub_from_pending_amount(true, base_ask_canceled);
-    position.sub_from_pending_amount(false, base_bid_canceled);
-    position.update_pending_orders(false, order_count)
+    assert!(!order_ids.is_empty(), EEmptyCancelOrderIds);
+    let canceled = try_cancel_orders_(
+        clearing_house,
+        account_id,
+        order_ids,
+        option::none(),
+        0,
+        cancelation_reason,
+    );
+    let mut i = 0;
+    while (i < canceled.length()) {
+        assert!(canceled[i], EOrderNotFound);
+        i = i + 1;
+    };
 }
 
 fun try_cancel_orders_<T>(
@@ -3285,6 +3169,7 @@ fun try_cancel_orders_<T>(
     order_ids: &vector<u128>,
     cancel_stale_at: Option<u64>,
     account_base: u256,
+    cancelation_reason: u8,
 ): vector<bool> {
     let mut results = vector[];
     let ch_id = clearing_house.id.to_inner();
@@ -3308,7 +3193,7 @@ fun try_cancel_orders_<T>(
         } else {
             let (canceled, size, client_order_id) =
                 orderbook.try_cancel_limit_order(account_id, order_id);
-            (canceled, size, client_order_id, 0)
+            (canceled, size, client_order_id, cancelation_reason)
         };
         results.push_back(canceled);
         if (canceled) {
@@ -3318,7 +3203,7 @@ fun try_cancel_orders_<T>(
             } else {
                 base_bid_canceled = base_bid_canceled + (size as u128);
             };
-            events::emit_canceled_order(
+            events::canceled_order(
                 ch_id,
                 account_id,
                 order_id,
@@ -3391,7 +3276,7 @@ fun create_clearing_house_<T, VendorKey, ADMIN_OR_ASSISTANT>(
     let (premium_twap_frequency_ms, premium_twap_period_ms) = market_params.premium_twap_params();
     let (spread_twap_frequency_ms, spread_twap_period_ms) = market_params.spread_twap_params();
     let (max_bad_debt, max_socialize_losses_mr_decrease) = market_params.max_bad_debt_thresholds();
-    events::emit_created_clearing_house(
+    events::created_clearing_house(
         ch_id,
         collateral_symbol<T>(),
         decimals,

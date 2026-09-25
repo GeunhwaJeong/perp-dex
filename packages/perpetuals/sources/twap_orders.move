@@ -151,7 +151,7 @@ public fun create_twap_order_ticket<T, ADMIN_OR_ASSISTANT>(
         retry_anchor_timestamp_ms: 0,
         last_execution_timestamp_ms: 0,
     };
-    events::emit_created_twap_order_ticket<T>(
+    events::created_twap_order_ticket<T>(
         ticket.id.to_inner(),
         clearing_house_id,
         account_id,
@@ -176,51 +176,11 @@ public fun cancel<T>(
     clearing_house.assert_package_version();
     account.assert_order_ticket_exists(twap_order_ticket_id);
     let ticket: TWAPOrderTicket<T> = account.remove_order_ticket(twap_order_ticket_id);
-    let executor_address = executor.executor_sender();
     ticket.assert_valid_ticket_executor(executor);
-    ticket.assert_valid_ticket_clearing_house(object::id(clearing_house));
-
-    // A partially executed order releases the collateral it no longer needs (not while paused).
-    let deallocated_collateral = if (
-        ticket.processed_amount != 0 && !clearing_house.is_market_paused()
-    ) {
-        clearing_house.deallocate_collateral_internal(
-            account,
-            base_oracle,
-            collateral_oracle,
-            option::none(),
-            clock,
-        )
-    } else {
-        0
-    };
-    events::emit_canceled_twap_order_ticket<T>(
-        ticket.id.to_inner(),
-        ticket.account_id,
-        executor_address,
-        deallocated_collateral,
-        ticket.processed_amount != 0,
-    );
-
-    let TWAPOrderTicket {
-        id,
-        clearing_house_id: _,
-        executors: _,
-        execution_domain: _,
-        gas,
-        gas_execution_budget: _,
-        account_id,
-        encrypted_details: _,
-        processed_amount: _,
-        scheduled_amount: _,
-        last_attempt_timestamp_ms: _,
-        retry_anchor_timestamp_ms: _,
-        last_execution_timestamp_ms: _,
-        paid_execution_gas: _,
-    } = ticket;
-    events::emit_deleted_twap_order_ticket<T>(id.to_inner(), account_id, executor_address);
-    id.delete();
-    coin::from_balance(gas, ctx)
+    cancel_ticket(
+        account, clearing_house, base_oracle, collateral_oracle, ticket, clock,
+        executor.executor_sender(), ctx,
+    )
 }
 
 public fun user_cancel_twap_order<T, Role>(
@@ -237,9 +197,24 @@ public fun user_cancel_twap_order<T, Role>(
     account.assert_authority_cap_is_valid(cap);
     account.assert_order_ticket_exists(twap_order_ticket_id);
     let ticket: TWAPOrderTicket<T> = account.remove_order_ticket(twap_order_ticket_id);
-    let sender = ctx.sender();
-    ticket.assert_valid_ticket_clearing_house(object::id(clearing_house));
+    cancel_ticket(
+        account, clearing_house, base_oracle, collateral_oracle, ticket, clock, ctx.sender(), ctx,
+    )
+}
 
+/// Deletes a removed ticket, releasing the collateral a partially executed order no longer
+/// needs (not while the market is paused), and returns its gas.
+fun cancel_ticket<T>(
+    account: &mut Account<T>,
+    clearing_house: &mut ClearingHouse<T>,
+    base_oracle: &PriceFeedStorage,
+    collateral_oracle: &PriceFeedStorage,
+    ticket: TWAPOrderTicket<T>,
+    clock: &Clock,
+    by: address,
+    ctx: &mut TxContext,
+): Coin<HANEUL> {
+    ticket.assert_valid_ticket_clearing_house(object::id(clearing_house));
     let deallocated_collateral = if (
         ticket.processed_amount != 0 && !clearing_house.is_market_paused()
     ) {
@@ -253,14 +228,13 @@ public fun user_cancel_twap_order<T, Role>(
     } else {
         0
     };
-    events::emit_canceled_twap_order_ticket<T>(
+    events::canceled_twap_order_ticket<T>(
         ticket.id.to_inner(),
         ticket.account_id,
-        sender,
+        by,
         deallocated_collateral,
         ticket.processed_amount != 0,
     );
-
     let TWAPOrderTicket {
         id,
         clearing_house_id: _,
@@ -277,7 +251,7 @@ public fun user_cancel_twap_order<T, Role>(
         last_execution_timestamp_ms: _,
         paid_execution_gas: _,
     } = ticket;
-    events::emit_deleted_twap_order_ticket<T>(id.to_inner(), account_id, sender);
+    events::deleted_twap_order_ticket<T>(id.to_inner(), account_id, by);
     id.delete();
     coin::from_balance(gas, ctx)
 }
@@ -314,7 +288,7 @@ public fun finalize<T>(
     } else {
         deallocated_collateral = 0;
     };
-    events::emit_finalized_twap_order_ticket<T>(
+    events::finalized_twap_order_ticket<T>(
         ticket.id.to_inner(),
         ticket.account_id,
         executor_address,
@@ -337,7 +311,7 @@ public fun finalize<T>(
         last_execution_timestamp_ms: _,
         paid_execution_gas: _,
     } = ticket;
-    events::emit_deleted_twap_order_ticket<T>(id.to_inner(), account_id, executor_address);
+    events::deleted_twap_order_ticket<T>(id.to_inner(), account_id, executor_address);
     id.delete();
     coin::from_balance(gas, ctx)
 }
@@ -523,7 +497,7 @@ public fun execute<T>(
             ticket.last_execution_timestamp_ms = now;
             ticket.processed_amount = ticket.processed_amount + filled_amount
         };
-        events::emit_processed_twap_order_ticket<T>(
+        events::processed_twap_order_ticket<T>(
             ticket.id.to_inner(),
             account_id,
             execution_amount,
@@ -570,7 +544,7 @@ public fun set_details<T, ADMIN_OR_ASSISTANT>(
     let ticket: &mut TWAPOrderTicket<T> = account.borrow_mut_order_ticket(twap_order_ticket_id);
     assert!(!ticket.has_attempts(), ETwapOrderCannotEditActiveOrder);
     ticket.encrypted_details = encrypted_details;
-    events::emit_edited_twap_order_ticket_details<T>(ticket.id.to_inner(), ticket.account_id, encrypted_details)
+    events::edited_twap_order_ticket_details<T>(ticket.id.to_inner(), ticket.account_id, encrypted_details)
 }
 
 public fun set_executors<T, ADMIN_OR_ASSISTANT>(
@@ -587,7 +561,7 @@ public fun set_executors<T, ADMIN_OR_ASSISTANT>(
     let ticket: &mut TWAPOrderTicket<T> = account.borrow_mut_order_ticket(twap_order_ticket_id);
     assert!(!ticket.has_attempts(), ETwapOrderCannotEditActiveOrder);
     ticket.executors = executors;
-    events::emit_edited_twap_order_ticket_executors<T>(ticket.id.to_inner(), ticket.account_id, executors)
+    events::edited_twap_order_ticket_executors<T>(ticket.id.to_inner(), ticket.account_id, executors)
 }
 
 /// The ticket only stores `blake2b256(bcs(details))`; executors reveal the details on each call.

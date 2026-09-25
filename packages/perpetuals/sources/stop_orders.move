@@ -76,7 +76,7 @@ public fun create_stop_order_ticket<T, ADMIN_OR_ASSISTANT>(
         stop_order_type,
         encrypted_details,
     };
-    events::emit_created_stop_order_ticket<T>(
+    events::created_stop_order_ticket<T>(
         ticket.id.to_inner(),
         account_id,
         executors,
@@ -108,7 +108,7 @@ public fun cancel<T, ADMIN_OR_ASSISTANT>(
         stop_order_type: _,
         encrypted_details: _,
     } = account.remove_order_ticket(ticket_id);
-    events::emit_deleted_stop_order_ticket<T>(id.to_inner(), account_id, ctx.sender());
+    events::deleted_stop_order_ticket<T>(id.to_inner(), account_id, ctx.sender());
     id.delete();
     coin::from_balance(gas, ctx)
 }
@@ -134,7 +134,7 @@ public fun cancel_stop_order_ticket<T>(
         stop_order_type: _,
         encrypted_details: _,
     } = ticket;
-    events::emit_deleted_stop_order_ticket<T>(id.to_inner(), account_id, executor_address);
+    events::deleted_stop_order_ticket<T>(id.to_inner(), account_id, executor_address);
     id.delete();
     coin::from_balance(gas, ctx)
 }
@@ -152,7 +152,7 @@ public fun edit_stop_order_ticket_details<T, ADMIN_OR_ASSISTANT>(
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
     account.borrow_mut_order_ticket<_, StopOrderTicket<T>>(ticket_id).encrypted_details =
         encrypted_details;
-    events::emit_edited_stop_order_ticket_details<T>(ticket_id, account.account_id(), encrypted_details)
+    events::edited_stop_order_ticket_details<T>(ticket_id, account.account_id(), encrypted_details)
 }
 
 public fun edit_stop_order_ticket_executors<T, ADMIN_OR_ASSISTANT>(
@@ -168,7 +168,7 @@ public fun edit_stop_order_ticket_executors<T, ADMIN_OR_ASSISTANT>(
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
     account.borrow_mut_order_ticket<_, StopOrderTicket<T>>(ticket_id).executors =
         executors;
-    events::emit_edited_stop_order_ticket_executors<T>(ticket_id, account.account_id(), executors)
+    events::edited_stop_order_ticket_executors<T>(ticket_id, account.account_id(), executors)
 }
 
 /// Executes a stop loss / take profit ticket: closes (part of) the account's position once the
@@ -198,25 +198,7 @@ public fun place_stop_order_sltp<T>(
     clearing_house.assert_market_is_not_paused();
     assert!(ctx.gas_price() == ctx.reference_gas_price(), EInvalidStopOrderGasPrice);
 
-    let (gas, stop_order_type, encrypted_details) = {
-        account.assert_order_ticket_exists(ticket_id);
-        let executor_address = executor.executor_sender();
-        let ticket: StopOrderTicket<T> = account.remove_order_ticket(ticket_id);
-        ticket.assert_valid_ticket_executor(executor);
-        let StopOrderTicket {
-            id,
-            executors: _,
-            execution_domain: _,
-            gas,
-            account_id,
-            stop_order_type,
-            encrypted_details,
-        } = ticket;
-        events::emit_executed_stop_order_ticket<T>(id.to_inner(), account_id, executor_address);
-        id.delete();
-        (gas, stop_order_type, encrypted_details)
-    };
-    assert!(stop_order_type == 0, EWrongStopOrderTypeForExecution);
+    let (gas, encrypted_details) = consume_ticket(account, ticket_id, executor, 0);
     assert_stop_order_trigger_price_type(trigger_price_type);
 
     // The ticket commits to blake2b256(bcs(order details) || salt).
@@ -275,35 +257,10 @@ public fun place_stop_order_sltp<T>(
     let position_size = ifixed::abs(position_base);
     let size = requested_size.min(ifixed::to_balance(position_size, 1_000_000_000));
 
-    let mut session = clearing_house.start_session_(
-        account.account_id(),
-        base_oracle,
-        collateral_oracle,
-        false,
-        integrator_info,
-        clock,
+    let (summary, clearing_house) = run_stop_order(
+        clearing_house, account, base_oracle, collateral_oracle, clock, integrator_info,
+        !position_is_ask, size, price, is_limit_order, order_type, true, expire_timestamp, false,
     );
-    if (is_limit_order) {
-        let _ = session.place_limit_order(
-            !position_is_ask,
-            size,
-            price,
-            order_type,
-            option::none(),
-            true,
-            expire_timestamp,
-        );
-    } else {
-        session.place_market_order(!position_is_ask, size, false)
-    };
-    let summary = session.summary();
-    assert!(
-        summary.base_filled_ask() != 0
-            || summary.base_filled_bid() != 0
-            || summary.posted_orders() != 0,
-        EStopOrderWithoutEconomicActivity,
-    );
-    let (clearing_house, summary) = session.end_session_(account, false, true, false);
     (summary, coin::from_balance(gas, ctx), clearing_house)
 }
 
@@ -335,25 +292,7 @@ public fun place_stop_order_standalone<T>(
     clearing_house.assert_market_is_not_paused();
     assert!(ctx.gas_price() == ctx.reference_gas_price(), EInvalidStopOrderGasPrice);
 
-    let (gas, stop_order_type, encrypted_details) = {
-        account.assert_order_ticket_exists(ticket_id);
-        let ticket: StopOrderTicket<T> = account.remove_order_ticket(ticket_id);
-        let executor_address = executor.executor_sender();
-        ticket.assert_valid_ticket_executor(executor);
-        let StopOrderTicket {
-            id,
-            executors: _,
-            execution_domain: _,
-            gas,
-            account_id,
-            stop_order_type,
-            encrypted_details,
-        } = ticket;
-        events::emit_executed_stop_order_ticket<T>(id.to_inner(), account_id, executor_address);
-        id.delete();
-        (gas, stop_order_type, encrypted_details)
-    };
-    assert!(stop_order_type == 1, EWrongStopOrderTypeForExecution);
+    let (gas, encrypted_details) = consume_ticket(account, ticket_id, executor, 1);
     assert_stop_order_trigger_price_type(trigger_price_type);
 
     // The ticket commits to blake2b256(bcs(order details) || salt).
@@ -395,6 +334,56 @@ public fun place_stop_order_standalone<T>(
         EStopOrderConditionsViolated,
     );
 
+    let (summary, clearing_house) = run_stop_order(
+        clearing_house, account, base_oracle, collateral_oracle, clock, integrator_info,
+        side, size, price, is_limit_order, order_type, reduce_only, expire_timestamp, !reduce_only,
+    );
+    (summary, coin::from_balance(gas, ctx), clearing_house)
+}
+
+/// Removes the ticket from the account, checks its executor and type, and returns its gas and
+/// commitment.
+fun consume_ticket<T>(
+    account: &mut Account<T>,
+    ticket_id: ID,
+    executor: &Executor,
+    expected_type: u64,
+): (Balance<HANEUL>, vector<u8>) {
+    account.assert_order_ticket_exists(ticket_id);
+    let ticket: StopOrderTicket<T> = account.remove_order_ticket(ticket_id);
+    ticket.assert_valid_ticket_executor(executor);
+    let StopOrderTicket {
+        id,
+        executors: _,
+        execution_domain: _,
+        gas,
+        account_id,
+        stop_order_type,
+        encrypted_details,
+    } = ticket;
+    events::executed_stop_order_ticket<T>(id.to_inner(), account_id, executor.executor_sender());
+    id.delete();
+    assert!(stop_order_type == expected_type, EWrongStopOrderTypeForExecution);
+    (gas, encrypted_details)
+}
+
+/// Places the committed order in a session of its own, which must fill or rest something.
+fun run_stop_order<T>(
+    clearing_house: ClearingHouse<T>,
+    account: &mut Account<T>,
+    base_oracle: &PriceFeedStorage,
+    collateral_oracle: &PriceFeedStorage,
+    clock: &Clock,
+    integrator_info: Option<IntegratorInfo>,
+    side: bool,
+    size: u64,
+    price: u64,
+    is_limit_order: bool,
+    order_type: u64,
+    reduce_only: bool,
+    expire_timestamp: Option<u64>,
+    allocate_missing_margin: bool,
+): (SessionSummary, ClearingHouse<T>) {
     let mut session = clearing_house.start_session_(
         account.account_id(),
         base_oracle,
@@ -423,8 +412,9 @@ public fun place_stop_order_standalone<T>(
             || summary.posted_orders() != 0,
         EStopOrderWithoutEconomicActivity,
     );
-    let (clearing_house, summary) = session.end_session_(account, !reduce_only, true, false);
-    (summary, coin::from_balance(gas, ctx), clearing_house)
+    let (clearing_house, summary) =
+        session.end_session_(account, allocate_missing_margin, true, false);
+    (summary, clearing_house)
 }
 
 /// Trigger price types: 0 = index price, 1 = book price (index if the book is empty),

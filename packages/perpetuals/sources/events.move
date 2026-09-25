@@ -420,22 +420,22 @@ public struct Unfroze has copy, drop { id: ID, version: u64 }
 // === Functions ===
 
 /// Emits `CreatedAccount`.
-public(package) fun emit_created_account<T>(account_obj_id: ID, user: address, account_id: u64) {
+public(package) fun created_account<T>(account_obj_id: ID, user: address, account_id: u64) {
     event::emit(CreatedAccount<T> { account_obj_id, user, account_id })
 }
 
 /// Emits `DepositedCollateral`.
-public(package) fun emit_deposited_collateral<T>(account_id: u64, collateral: u64) {
+public(package) fun deposited_collateral<T>(account_id: u64, collateral: u64) {
     event::emit(DepositedCollateral<T> { account_id, collateral })
 }
 
 /// Emits `AllocatedCollateral`.
-public(package) fun emit_allocated_collateral(ch_id: ID, account_id: u64, collateral: u64) {
+public(package) fun allocated_collateral(ch_id: ID, account_id: u64, collateral: u64) {
     event::emit(AllocatedCollateral { ch_id, account_id, collateral })
 }
 
 /// Emits `CreatedClearingHouse`.
-public(package) fun emit_created_clearing_house(
+public(package) fun created_clearing_house(
     ch_id: ID,
     collateral: String,
     coin_decimals: u64,
@@ -490,32 +490,32 @@ public(package) fun emit_created_clearing_house(
 }
 
 /// Emits `UpgradedVersion`.
-public(package) fun emit_upgraded_version(id: ID, version: u64) {
+public(package) fun upgraded_version(id: ID, version: u64) {
     event::emit(UpgradedVersion { id, version })
 }
 
 /// Emits `RegisteredVendor`.
-public(package) fun emit_registered_vendor(vendor_key: TypeName, vendor_admin_cap_id: ID) {
+public(package) fun registered_vendor(vendor_key: TypeName, vendor_admin_cap_id: ID) {
     event::emit(RegisteredVendor { vendor_key, vendor_admin_cap_id })
 }
 
 /// Emits `Froze`.
-public(package) fun emit_froze(id: ID, resume_version: u64, guardian_cap_id: ID) {
+public(package) fun froze(id: ID, resume_version: u64, guardian_cap_id: ID) {
     event::emit(Froze { id, resume_version, guardian_cap_id })
 }
 
 /// Emits `Unfroze`.
-public(package) fun emit_unfroze(id: ID, version: u64) {
+public(package) fun unfroze(id: ID, version: u64) {
     event::emit(Unfroze { id, version })
 }
 
 /// Emits `ClosedMarket`.
-public(package) fun emit_closed_market(ch_id: ID) {
+public(package) fun closed_market(ch_id: ID) {
     event::emit(ClosedMarket { ch_id })
 }
 
 /// Emits `UpdatedSettlementPrices`.
-public(package) fun emit_updated_settlement_prices(
+public(package) fun updated_settlement_prices(
     ch_id: ID,
     base_settlement_price: u256,
     collateral_settlement_price: u256,
@@ -530,7 +530,7 @@ public(package) fun emit_updated_settlement_prices(
 }
 
 /// Emits `UpdatedIntegratorAddress`.
-public(package) fun emit_updated_integrator_address(
+public(package) fun updated_integrator_address(
     integrator_id: u32,
     previous_integrator_address: address,
     new_integrator_address: address,
@@ -543,7 +543,7 @@ public(package) fun emit_updated_integrator_address(
 }
 
 /// Emits `UpdatedPremiumTwap`.
-public(package) fun emit_updated_premium_twap(
+public(package) fun updated_premium_twap(
     ch_id: ID,
     actual_book_price: u256,
     clipped_book_price: u256,
@@ -562,7 +562,7 @@ public(package) fun emit_updated_premium_twap(
 }
 
 /// Emits `UpdatedSpreadTwap`.
-public(package) fun emit_updated_spread_twap(
+public(package) fun updated_spread_twap(
     ch_id: ID,
     actual_book_price: u256,
     clipped_book_price: u256,
@@ -581,7 +581,7 @@ public(package) fun emit_updated_spread_twap(
 }
 
 /// Emits `UpdatedFunding`.
-public(package) fun emit_updated_funding(
+public(package) fun updated_funding(
     ch_id: ID,
     cum_funding_rate_long: u256,
     cum_funding_rate_short: u256,
@@ -596,7 +596,7 @@ public(package) fun emit_updated_funding(
 }
 
 /// Emits `SettledFunding`.
-public(package) fun emit_settled_funding(
+public(package) fun settled_funding(
     ch_id: ID,
     account_id: u64,
     collateral_change_usd: u256,
@@ -615,12 +615,12 @@ public(package) fun emit_settled_funding(
 }
 
 /// Emits `SetPositionInitialMarginRatio`.
-public(package) fun emit_set_position_initial_margin_ratio(ch_id: ID, account_id: u64, initial_margin_ratio: u256) {
+public(package) fun set_position_initial_margin_ratio(ch_id: ID, account_id: u64, initial_margin_ratio: u256) {
     event::emit(SetPositionInitialMarginRatio { ch_id, account_id, initial_margin_ratio })
 }
 
 /// Emits `PostedOrder`.
-public(package) fun emit_posted_order(
+public(package) fun posted_order(
     ch_id: ID,
     account_id: u64,
     order_id: u128,
@@ -649,7 +649,7 @@ public(package) fun emit_posted_order(
 }
 
 /// Emits `FilledMakerOrders`.
-public(package) fun emit_filled_maker_orders(events: vector<FilledMakerOrder>, book_price: Option<u64>) {
+public(package) fun filled_maker_orders(events: vector<FilledMakerOrder>, book_price: Option<u64>) {
     event::emit(FilledMakerOrders { events, book_price })
 }
 
@@ -689,7 +689,7 @@ public(package) fun filled_maker_order(
 }
 
 /// Emits `FilledTakerOrder`.
-public(package) fun emit_filled_taker_order(
+public(package) fun filled_taker_order(
     ch_id: ID,
     taker_account_id: u64,
     taker_pnl: u256,
@@ -718,7 +718,7 @@ public(package) fun emit_filled_taker_order(
 }
 
 /// Emits `ClosedPositionAtSettlementPrices`.
-public(package) fun emit_closed_position_at_settlement_prices(
+public(package) fun closed_position_at_settlement_prices(
     ch_id: ID,
     account_id: u64,
     pnl: u256,
@@ -739,7 +739,7 @@ public(package) fun emit_closed_position_at_settlement_prices(
 }
 
 /// Emits `CanceledOrder`.
-public(package) fun emit_canceled_order(
+public(package) fun canceled_order(
     ch_id: ID,
     account_id: u64,
     order_id: u128,
@@ -760,7 +760,7 @@ public(package) fun emit_canceled_order(
 }
 
 /// Emits `LiquidatedPosition`.
-public(package) fun emit_liquidated_position(
+public(package) fun liquidated_position(
     ch_id: ID,
     liqee_account_id: u64,
     liqor_account_id: u64,
@@ -789,7 +789,7 @@ public(package) fun emit_liquidated_position(
 }
 
 /// Emits `PerformedLiquidation`.
-public(package) fun emit_performed_liquidation(
+public(package) fun performed_liquidation(
     ch_id: ID,
     liqee_account_id: u64,
     liqor_account_id: u64,
@@ -814,7 +814,7 @@ public(package) fun emit_performed_liquidation(
 }
 
 /// Emits `PerformedADL`.
-public(package) fun emit_performed_adl(
+public(package) fun performed_adl(
     ch_id: ID,
     bad_debt_account_id: u64,
     size_reduced: u64,
@@ -835,7 +835,7 @@ public(package) fun emit_performed_adl(
 }
 
 /// Emits `SocializedBadDebt`.
-public(package) fun emit_socialized_bad_debt(
+public(package) fun socialized_bad_debt(
     ch_id: ID,
     bad_debt_usd: u256,
     socialized_fundings: u256,
@@ -854,22 +854,22 @@ public(package) fun emit_socialized_bad_debt(
 }
 
 /// Emits `WithdrewCollateral`.
-public(package) fun emit_withdrew_collateral<T>(account_id: u64, collateral: u64) {
+public(package) fun withdrew_collateral<T>(account_id: u64, collateral: u64) {
     event::emit(WithdrewCollateral<T> { account_id, collateral })
 }
 
 /// Emits `RegisteredCollateralInfo`.
-public(package) fun emit_registered_collateral_info<T>(storage_id: u32, source_id: u16, scaling_factor: u256) {
+public(package) fun registered_collateral_info<T>(storage_id: u32, source_id: u16, scaling_factor: u256) {
     event::emit(RegisteredCollateralInfo<T> { storage_id, source_id, scaling_factor })
 }
 
 /// Emits `DeallocatedCollateral`.
-public(package) fun emit_deallocated_collateral(ch_id: ID, account_id: u64, collateral: u64) {
+public(package) fun deallocated_collateral(ch_id: ID, account_id: u64, collateral: u64) {
     event::emit(DeallocatedCollateral { ch_id, account_id, collateral })
 }
 
 /// Emits `CreatedPosition`.
-public(package) fun emit_created_position(
+public(package) fun created_position(
     ch_id: ID,
     account_id: u64,
     mkt_funding_rate_long: u256,
@@ -884,7 +884,7 @@ public(package) fun emit_created_position(
 }
 
 /// Emits `CreatedStopOrderTicket`.
-public(package) fun emit_created_stop_order_ticket<T>(
+public(package) fun created_stop_order_ticket<T>(
     ticket_id: ID,
     account_id: u64,
     executors: vector<address>,
@@ -905,27 +905,27 @@ public(package) fun emit_created_stop_order_ticket<T>(
 }
 
 /// Emits `ExecutedStopOrderTicket`.
-public(package) fun emit_executed_stop_order_ticket<T>(ticket_id: ID, account_id: u64, executor: address) {
+public(package) fun executed_stop_order_ticket<T>(ticket_id: ID, account_id: u64, executor: address) {
     event::emit(ExecutedStopOrderTicket<T> { ticket_id, account_id, executor })
 }
 
 /// Emits `DeletedStopOrderTicket`.
-public(package) fun emit_deleted_stop_order_ticket<T>(ticket_id: ID, account_id: u64, executor: address) {
+public(package) fun deleted_stop_order_ticket<T>(ticket_id: ID, account_id: u64, executor: address) {
     event::emit(DeletedStopOrderTicket<T> { ticket_id, account_id, executor })
 }
 
 /// Emits `EditedStopOrderTicketDetails`.
-public(package) fun emit_edited_stop_order_ticket_details<T>(ticket_id: ID, account_id: u64, encrypted_details: vector<u8>) {
+public(package) fun edited_stop_order_ticket_details<T>(ticket_id: ID, account_id: u64, encrypted_details: vector<u8>) {
     event::emit(EditedStopOrderTicketDetails<T> { ticket_id, account_id, encrypted_details })
 }
 
 /// Emits `EditedStopOrderTicketExecutors`.
-public(package) fun emit_edited_stop_order_ticket_executors<T>(ticket_id: ID, account_id: u64, executors: vector<address>) {
+public(package) fun edited_stop_order_ticket_executors<T>(ticket_id: ID, account_id: u64, executors: vector<address>) {
     event::emit(EditedStopOrderTicketExecutors<T> { ticket_id, account_id, executors })
 }
 
 /// Emits `CreatedTWAPOrderTicket`.
-public(package) fun emit_created_twap_order_ticket<T>(
+public(package) fun created_twap_order_ticket<T>(
     ticket_id: ID,
     ch_id: ID,
     account_id: u64,
@@ -946,7 +946,7 @@ public(package) fun emit_created_twap_order_ticket<T>(
 }
 
 /// Emits `ProcessedTWAPOrderTicket`.
-public(package) fun emit_processed_twap_order_ticket<T>(
+public(package) fun processed_twap_order_ticket<T>(
     ticket_id: ID,
     account_id: u64,
     execution_amount: u64,
@@ -973,7 +973,7 @@ public(package) fun emit_processed_twap_order_ticket<T>(
 }
 
 /// Emits `FinalizedTWAPOrderTicket`.
-public(package) fun emit_finalized_twap_order_ticket<T>(
+public(package) fun finalized_twap_order_ticket<T>(
     ticket_id: ID,
     account_id: u64,
     executor: address,
@@ -988,7 +988,7 @@ public(package) fun emit_finalized_twap_order_ticket<T>(
 }
 
 /// Emits `CanceledTWAPOrderTicket`.
-public(package) fun emit_canceled_twap_order_ticket<T>(
+public(package) fun canceled_twap_order_ticket<T>(
     ticket_id: ID,
     account_id: u64,
     sender: address,
@@ -1005,27 +1005,27 @@ public(package) fun emit_canceled_twap_order_ticket<T>(
 }
 
 /// Emits `DeletedTWAPOrderTicket`.
-public(package) fun emit_deleted_twap_order_ticket<T>(ticket_id: ID, account_id: u64, executor: address) {
+public(package) fun deleted_twap_order_ticket<T>(ticket_id: ID, account_id: u64, executor: address) {
     event::emit(DeletedTWAPOrderTicket<T> { ticket_id, account_id, executor })
 }
 
 /// Emits `EditedTWAPOrderTicketDetails`.
-public(package) fun emit_edited_twap_order_ticket_details<T>(ticket_id: ID, account_id: u64, encrypted_details: vector<u8>) {
+public(package) fun edited_twap_order_ticket_details<T>(ticket_id: ID, account_id: u64, encrypted_details: vector<u8>) {
     event::emit(EditedTWAPOrderTicketDetails<T> { ticket_id, account_id, encrypted_details })
 }
 
 /// Emits `EditedTWAPOrderTicketExecutors`.
-public(package) fun emit_edited_twap_order_ticket_executors<T>(ticket_id: ID, account_id: u64, executors: vector<address>) {
+public(package) fun edited_twap_order_ticket_executors<T>(ticket_id: ID, account_id: u64, executors: vector<address>) {
     event::emit(EditedTWAPOrderTicketExecutors<T> { ticket_id, account_id, executors })
 }
 
 /// Emits `UpdatedMarginRatios`.
-public(package) fun emit_updated_margin_ratios(ch_id: ID, margin_ratio_initial: u256, margin_ratio_maintenance: u256) {
+public(package) fun updated_margin_ratios(ch_id: ID, margin_ratio_initial: u256, margin_ratio_maintenance: u256) {
     event::emit(UpdatedMarginRatios { ch_id, margin_ratio_initial, margin_ratio_maintenance })
 }
 
 /// Emits `SetFeeParams`.
-public(package) fun emit_set_fee_params(
+public(package) fun set_fee_params(
     ch_id: ID,
     maker_fee: u256,
     taker_fee: u256,
@@ -1044,7 +1044,7 @@ public(package) fun emit_set_fee_params(
 }
 
 /// Emits `SetTwapParams`.
-public(package) fun emit_set_twap_params(
+public(package) fun set_twap_params(
     ch_id: ID,
     funding_frequency_ms: u64,
     funding_period_ms: u64,
@@ -1065,22 +1065,22 @@ public(package) fun emit_set_twap_params(
 }
 
 /// Emits `SetCoreParams`.
-public(package) fun emit_set_core_params(ch_id: ID, lot_size: u64, tick_size: u64, collateral_haircut: u256) {
+public(package) fun set_core_params(ch_id: ID, lot_size: u64, tick_size: u64, collateral_haircut: u256) {
     event::emit(SetCoreParams { ch_id, lot_size, tick_size, collateral_haircut })
 }
 
 /// Emits `SetBaseOracleParams`.
-public(package) fun emit_set_base_oracle_params(ch_id: ID, storage_id: u32, source_id: u16, pfs_tolerance: u64) {
+public(package) fun set_base_oracle_params(ch_id: ID, storage_id: u32, source_id: u16, pfs_tolerance: u64) {
     event::emit(SetBaseOracleParams { ch_id, storage_id, source_id, pfs_tolerance })
 }
 
 /// Emits `SetCollateralOracleParams`.
-public(package) fun emit_set_collateral_oracle_params(ch_id: ID, storage_id: u32, source_id: u16, pfs_tolerance: u64) {
+public(package) fun set_collateral_oracle_params(ch_id: ID, storage_id: u32, source_id: u16, pfs_tolerance: u64) {
     event::emit(SetCollateralOracleParams { ch_id, storage_id, source_id, pfs_tolerance })
 }
 
 /// Emits `SetRiskLimitParams`.
-public(package) fun emit_set_risk_limit_params(
+public(package) fun set_risk_limit_params(
     ch_id: ID,
     min_order_usd_value: u256,
     max_pending_orders: u64,
@@ -1107,17 +1107,17 @@ public(package) fun emit_set_risk_limit_params(
 }
 
 /// Emits `DonatedToInsuranceFund`.
-public(package) fun emit_donated_to_insurance_fund(sender: address, ch_id: ID, amount: u64, new_balance: u64) {
+public(package) fun donated_to_insurance_fund(sender: address, ch_id: ID, amount: u64, new_balance: u64) {
     event::emit(DonatedToInsuranceFund { sender, ch_id, amount, new_balance })
 }
 
 /// Emits `WithdrewFees`.
-public(package) fun emit_withdrew_fees(sender: address, ch_id: ID, amount: u64, vault_balance_after: u64) {
+public(package) fun withdrew_fees(sender: address, ch_id: ID, amount: u64, vault_balance_after: u64) {
     event::emit(WithdrewFees { sender, ch_id, amount, vault_balance_after })
 }
 
 /// Emits `WithdrewInsuranceFund`.
-public(package) fun emit_withdrew_insurance_fund(
+public(package) fun withdrew_insurance_fund(
     sender: address,
     ch_id: ID,
     amount: u64,
@@ -1127,7 +1127,7 @@ public(package) fun emit_withdrew_insurance_fund(
 }
 
 /// Emits `UpdatedOpenInterestAndFeesAccrued`.
-public(package) fun emit_updated_open_interest_and_fees_accrued(ch_id: ID, open_interest: u256, fees_accrued: u256) {
+public(package) fun updated_open_interest_and_fees_accrued(ch_id: ID, open_interest: u256, fees_accrued: u256) {
     event::emit(UpdatedOpenInterestAndFeesAccrued { ch_id, open_interest, fees_accrued })
 }
 

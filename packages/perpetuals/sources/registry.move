@@ -555,7 +555,7 @@ public fun unfreeze_package(
     let resume_version = dynamic_field::remove<_, u64>(&mut registry.id, keys::frozen_version());
     assert!(resume_version <= 1, EInvalidResumeVersion);
     registry.version = resume_version;
-    events::emit_unfroze(registry.id.to_inner(), resume_version)
+    events::unfroze(registry.id.to_inner(), resume_version)
 }
 
 public fun freeze_package(
@@ -568,7 +568,7 @@ public fun freeze_package(
     dynamic_field::add(&mut registry.id, keys::frozen_version(), resume_version);
     // No package version can satisfy `assert_package_version` until the registry is unfrozen.
     registry.version = std::u64::max_value!();
-    events::emit_froze(registry.id.to_inner(), resume_version, object::id(cap))
+    events::froze(registry.id.to_inner(), resume_version, object::id(cap))
 }
 
 public fun guardian_deauthorize_authority_cap<VendorKey, Role>(
@@ -587,7 +587,7 @@ entry fun upgrade_version<ADMIN_OR_ASSISTANT>(
 ) {
     registry.assert_admin_or_authorized_assistant_authority_cap(cap);
     assert!(registry.version < 1, EInvalidVersionUpgradeValue);
-    events::emit_upgraded_version(registry.id.to_inner(), 1);
+    events::upgraded_version(registry.id.to_inner(), 1);
     registry.version = 1
 }
 
@@ -894,7 +894,7 @@ public fun register_vendor<VendorKey, ADMIN_OR_ASSISTANT>(
     );
     let admin_cap = authority::create_vendor_admin_cap<VendorKey>(&mut registry.id);
     registry.authorize_authority_cap(&admin_cap);
-    events::emit_registered_vendor(type_name::with_defining_ids<VendorKey>(), object::id(&admin_cap));
+    events::registered_vendor(type_name::with_defining_ids<VendorKey>(), object::id(&admin_cap));
     admin_cap
 }
 
@@ -998,7 +998,7 @@ fun set_integrator_address_(
     );
     let previous_integrator_address = registration.integrator_address;
     registration.integrator_address = new_integrator_address;
-    events::emit_updated_integrator_address(integrator_id, previous_integrator_address, new_integrator_address)
+    events::updated_integrator_address(integrator_id, previous_integrator_address, new_integrator_address)
 }
 
 public(package) fun assert_package_version(registry: &Registry) {

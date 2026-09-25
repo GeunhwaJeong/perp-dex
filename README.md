@@ -45,6 +45,21 @@ haneul move build --build-env mainnet
 
 Every package builds without warnings.
 
+## Package size
+
+The `perpetuals` package sits just under the chain's 100 KiB limit on a published package object
+(`max_move_package_size`, 102,400 bytes). The object carries about 6.7 KB of type origin and
+linkage tables on top of the module bytecode, so the modules must stay below roughly 95.7 KB;
+they are at 94.8 KB. Measure after building:
+
+```bash
+cd packages/perpetuals && haneul move build --build-env mainnet && \
+  ls -l build/perpetuals/bytecode_modules/*.mv | awk '{s+=$5} END {print s}'
+```
+
+A publish that fails with `MovePackageTooBig` means this budget was exceeded; function names are
+stored in every module that calls them, so long identifiers and duplicated code both count.
+
 ## Unit tests
 
 Six packages carry Move unit tests under their `tests/` directories, 255 in total:
