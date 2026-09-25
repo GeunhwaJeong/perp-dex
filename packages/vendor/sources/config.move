@@ -13,7 +13,7 @@ use std::type_name;
 use vendor::authority::{Self as vendor_authority, PACKAGE, REVOKE_VENDOR_GUARDIAN, VENDOR};
 use vendor::events;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 const EInvalidVersion: u64 = 0;
 const EConfigAlreadyCreated: u64 = 1;

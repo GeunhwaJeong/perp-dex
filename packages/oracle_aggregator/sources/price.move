@@ -9,7 +9,7 @@ use oracle_aggregator::price_feed_storage::PriceFeedStorage;
 use std::u128;
 use std::u64;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 #[error(code = 0)]
 const ENoSources: vector<u8> = b"There are no source feeds to query.";

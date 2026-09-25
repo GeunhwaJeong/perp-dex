@@ -3,7 +3,7 @@
 
 module oracle_aggregator::price_feed;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 #[error(code = 0)]
 const EPriceFeedAlreadyExists: vector<u8> =

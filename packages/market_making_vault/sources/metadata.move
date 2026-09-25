@@ -9,7 +9,7 @@ use market_making_vault::events;
 use market_making_vault::keys;
 use std::ascii::String;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 #[error(code = 0)]
 const EVaultMetadataCapAlreadyCreated: vector<u8> = b"The `VaultMetadata` has already been created for the given `Vault`.";

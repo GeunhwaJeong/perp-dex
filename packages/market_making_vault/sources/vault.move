@@ -28,7 +28,7 @@ use std::type_name;
 use std::u256;
 use std::u64;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 #[error(code = 0)]
 const EInvalidVaultAuthorityCap: vector<u8> = b"The provided AuthorityCap does not have permission to manage this Vault.";

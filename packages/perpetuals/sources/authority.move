@@ -9,9 +9,10 @@ use haneul::types;
 use std::internal;
 use std::type_name;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
-macro fun invalid_authority_role(): u64 { 6100 }
+const EInvalidAuthorityRole: u64 = 6100;
+const ENotOneTimeWitness: u64 = 66;
 
 // === Types ===
 
@@ -41,7 +42,7 @@ public(package) fun create_package_admin_cap_and_keep<T: drop>(
     registry_id: &mut UID,
     ctx: &TxContext,
 ) {
-    assert!(types::is_one_time_witness(witness), 66);
+    assert!(types::is_one_time_witness(witness), ENotOneTimeWitness);
     let cap = authority::new_admin_cap(
         registry_id,
         &PACKAGE {},
@@ -198,44 +199,24 @@ public(package) fun destroy_account_assistant_cap(
     cap.destroy(internal::permit<ACCOUNT>())
 }
 
-// In the role checks below each comparison first binds both operands, as the macro used by the
-// original source did; this keeps the compiled code identical to the published bytecode.
 public(package) fun assert_is_admin_or_assistant<Role>() {
     let role = type_name::with_defining_ids<Role>();
-    let is_admin_or_assistant = {
-        let actual = role;
-        let expected = type_name::with_defining_ids<ASSISTANT>();
-        actual == expected
-    } || {
-        let actual = role;
-        let expected = type_name::with_defining_ids<ADMIN>();
-        actual == expected
-    };
-    assert!(is_admin_or_assistant, invalid_authority_role!())
+    let is_admin_or_assistant = role == type_name::with_defining_ids<ASSISTANT>()
+        || role == type_name::with_defining_ids<ADMIN>();
+    assert!(is_admin_or_assistant, EInvalidAuthorityRole)
 }
 
 public(package) fun assert_is_admin_or_assistant_or_maintenance<Role>() {
     let role = type_name::with_defining_ids<Role>();
-    let is_allowed = {
-        let actual = role;
-        let expected = type_name::with_defining_ids<MAINTENANCE>();
-        actual == expected
-    } || {
-        let actual = role;
-        let expected = type_name::with_defining_ids<ASSISTANT>();
-        actual == expected
-    } || {
-        let actual = role;
-        let expected = type_name::with_defining_ids<ADMIN>();
-        actual == expected
-    };
-    assert!(is_allowed, invalid_authority_role!())
+    let is_allowed = role == type_name::with_defining_ids<MAINTENANCE>()
+        || role == type_name::with_defining_ids<ASSISTANT>()
+        || role == type_name::with_defining_ids<ADMIN>();
+    assert!(is_allowed, EInvalidAuthorityRole)
 }
 
 public(package) fun assert_is_not_admin<Role>() {
     let role = type_name::with_defining_ids<Role>();
-    let admin = type_name::with_defining_ids<ADMIN>();
-    assert!(!(role == admin), invalid_authority_role!())
+    assert!(role != type_name::with_defining_ids<ADMIN>(), EInvalidAuthorityRole)
 }
 
 /// The ID of this package's original (defining) address.

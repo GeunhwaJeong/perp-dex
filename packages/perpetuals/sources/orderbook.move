@@ -9,10 +9,10 @@ use ordered_map::ordered_map::{Self, Map};
 use perpetuals::account::IntegratorInfo;
 use perpetuals::keys;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
-macro fun invalid_user_for_order(): u64 { 3000 }
-macro fun invalid_map_params(): u64 { 3001 }
+const EInvalidUserForOrder: u64 = 3000;
+const EInvalidMapParams: u64 = 3001;
 
 // Order ids are `price << 64 | counter`. Bids store the bitwise complement of the price so that
 // both maps iterate from the best price; this also sets the top bit, so asks are exactly the ids
@@ -65,8 +65,8 @@ public(package) fun create_orderbook(
     leaf_max: u64,
     ctx: &mut TxContext,
 ): Orderbook {
-    assert!(branch_max <= 200, invalid_map_params!());
-    assert!(leaf_max <= 200, invalid_map_params!());
+    assert!(branch_max <= 200, EInvalidMapParams);
+    assert!(leaf_max <= 200, EInvalidMapParams);
     let mut orderbook = Orderbook {
         id: object::new(ctx),
         counter: 0,
@@ -225,9 +225,7 @@ public fun inspect_orders(
         let leaf_size = leaf.size();
         while (idx < leaf_size) {
             let (order_id, order) = leaf.elem(idx);
-            // A named block stands in for the original price macro; it keeps the compiled control
-            // flow identical to the published bytecode.
-            if ('price: { ((order_id >> 64) as u64) } >= to_key_price) {
+            if (((order_id >> 64) as u64) >= to_key_price) {
                 return (order_ids, orders)
             };
             order_ids.push_back(order_id);
@@ -270,7 +268,7 @@ public(package) fun cancel_limit_order(
 
     let order = map.remove(order_id);
     if (account_id != order.account_id) {
-        abort invalid_user_for_order!()
+        abort EInvalidUserForOrder
     };
     if (was_best_price) {
         if (map.is_empty()) {
@@ -316,7 +314,7 @@ public(package) fun try_cancel_limit_order(
         return (false, 0, option::none())
     };
     let order = order.destroy_some();
-    assert!(account_id == order.account_id, invalid_user_for_order!());
+    assert!(account_id == order.account_id, EInvalidUserForOrder);
     if (was_best_price) {
         if (map.is_empty()) {
             *best_price = option::none()
@@ -346,7 +344,7 @@ public(package) fun try_cancel_stale_limit_order(
         return (false, false, 0, option::none())
     };
     let order = order.destroy_some();
-    assert!(account_id == order.account_id, invalid_user_for_order!());
+    assert!(account_id == order.account_id, EInvalidUserForOrder);
 
     let is_expired = order.expiration_timestamp_ms.is_some()
         && *order.expiration_timestamp_ms.borrow() <= timestamp_ms;

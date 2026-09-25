@@ -27,36 +27,37 @@ use perpetuals::keys;
 use std::type_name;
 use vendor::metadata::VendorMetadata;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
-macro fun invalid_version(): u64 { 5000 }
-macro fun market_already_registered(): u64 { 5001 }
-macro fun market_is_not_registered(): u64 { 5002 }
-macro fun invalid_integrator_id(): u64 { 5003 }
-macro fun integrator_registration_does_not_exist(): u64 { 5004 }
-macro fun invalid_version_upgrade_value(): u64 { 5005 }
-macro fun invalid_vendor(): u64 { 5006 }
-macro fun authority_cap_not_authorized(): u64 { 5007 }
-macro fun invalid_funding_parameter_bounds(): u64 { 5008 }
-macro fun invalid_premium_twap_bounds(): u64 { 5009 }
-macro fun invalid_spread_twap_bounds(): u64 { 5010 }
-macro fun invalid_proposal_delay_bounds(): u64 { 5011 }
-macro fun invalid_min_order_usd_value_bounds(): u64 { 5012 }
-macro fun invalid_insurance_open_interest_fraction(): u64 { 5013 }
-macro fun invalid_min_oracle_tolerance(): u64 { 5014 }
-macro fun invalid_max_book_index_spread(): u64 { 5015 }
-macro fun invalid_max_index_twap_divergence(): u64 { 5016 }
-macro fun invalid_up_max_pending_orders(): u64 { 5017 }
-macro fun invalid_max_assistants_per_account(): u64 { 5018 }
-macro fun invalid_max_abs_maker_fee(): u64 { 5019 }
-macro fun invalid_max_abs_taker_fee(): u64 { 5020 }
-macro fun invalid_max_liquidation_fee(): u64 { 5021 }
-macro fun invalid_max_insurance_fund_fee(): u64 { 5022 }
-macro fun vendor_registration_not_approved(): u64 { 5023 }
-macro fun authority_cap_already_authorized(): u64 { 5024 }
-macro fun vendor_admin_cap_does_not_exist(): u64 { 5025 }
-macro fun not_frozen(): u64 { 5026 }
-macro fun invalid_resume_version(): u64 { 5027 }
+const EInvalidVersion: u64 = 5000;
+const EMarketAlreadyRegistered: u64 = 5001;
+const EMarketIsNotRegistered: u64 = 5002;
+const EInvalidIntegratorId: u64 = 5003;
+const EIntegratorRegistrationDoesNotExist: u64 = 5004;
+const EInvalidVersionUpgradeValue: u64 = 5005;
+const EInvalidVendor: u64 = 5006;
+const EAuthorityCapNotAuthorized: u64 = 5007;
+const EInvalidFundingParameterBounds: u64 = 5008;
+const EInvalidPremiumTwapBounds: u64 = 5009;
+const EInvalidSpreadTwapBounds: u64 = 5010;
+const EInvalidProposalDelayBounds: u64 = 5011;
+const EInvalidMinOrderUsdValueBounds: u64 = 5012;
+const EInvalidInsuranceOpenInterestFraction: u64 = 5013;
+const EInvalidMinOracleTolerance: u64 = 5014;
+const EInvalidMaxBookIndexSpread: u64 = 5015;
+const EInvalidMaxIndexTwapDivergence: u64 = 5016;
+const EInvalidUpMaxPendingOrders: u64 = 5017;
+const EInvalidMaxAssistantsPerAccount: u64 = 5018;
+const EInvalidMaxAbsMakerFee: u64 = 5019;
+const EInvalidMaxAbsTakerFee: u64 = 5020;
+const EInvalidMaxLiquidationFee: u64 = 5021;
+const EInvalidMaxInsuranceFundFee: u64 = 5022;
+const EVendorRegistrationNotApproved: u64 = 5023;
+const EAuthorityCapAlreadyAuthorized: u64 = 5024;
+const EVendorAdminCapDoesNotExist: u64 = 5025;
+const ENotFrozen: u64 = 5026;
+const EInvalidResumeVersion: u64 = 5027;
+const ENotOneTimeWitness: u64 = 66;
 
 // === Types ===
 
@@ -196,7 +197,7 @@ public fun max_assistants_per_account(config: &Config): u64 {
 }
 
 public(package) fun create_registry<T: drop>(witness: &T, ctx: &mut TxContext): Registry {
-    assert!(types::is_one_time_witness(witness), 66);
+    assert!(types::is_one_time_witness(witness), ENotOneTimeWitness);
     let mut registry = Registry {
         id: object::new(ctx),
         version: 1,
@@ -364,7 +365,7 @@ public(package) fun register_market<T>(
     ch_id: ID,
 ) {
     registry.assert_package_version();
-    assert!(!registry.is_market_registered(ch_id), market_already_registered!());
+    assert!(!registry.is_market_registered(ch_id), EMarketAlreadyRegistered);
     dynamic_field::add(
         &mut registry.id,
         keys::registry_market_info(ch_id),
@@ -383,13 +384,13 @@ public(package) fun register_market<T>(
             keys::registry_collateral_info<T>(),
             CollateralInfo<T> { collateral_storage_id, collateral_source_id, scaling_factor },
         );
-        events::e28<T>(collateral_storage_id, collateral_source_id, scaling_factor)
+        events::emit_registered_collateral_info<T>(collateral_storage_id, collateral_source_id, scaling_factor)
     }
 }
 
 public(package) fun remove_registered_market<T>(registry: &mut Registry, ch_id: ID) {
     registry.assert_package_version();
-    assert!(registry.is_market_registered(ch_id), market_is_not_registered!());
+    assert!(registry.is_market_registered(ch_id), EMarketIsNotRegistered);
     let MarketInfo<T> {
         base_storage_id: _,
         base_source_id: _,
@@ -436,12 +437,12 @@ public fun set_integrator_address(
     ctx: &TxContext,
 ) {
     registry.assert_package_version();
-    assert!(registry.is_integrator_id_registered(integrator_id), invalid_integrator_id!());
+    assert!(registry.is_integrator_id_registered(integrator_id), EInvalidIntegratorId);
     let current_address = dynamic_field::borrow<_, IntegratorRegistration>(
         &registry.id,
         keys::integrator_registration(integrator_id),
     ).integrator_address;
-    assert!(current_address == ctx.sender(), invalid_integrator_id!());
+    assert!(current_address == ctx.sender(), EInvalidIntegratorId);
     registry.set_integrator_address_(integrator_id, new_integrator_address)
 }
 
@@ -521,12 +522,12 @@ public fun reauthorize_vendor_admin_cap<VendorKey>(
     registry.assert_package_version();
     assert!(
         cap_authority::exists<VENDOR<VendorKey>, ADMIN>(&registry.id),
-        vendor_admin_cap_does_not_exist!(),
+        EVendorAdminCapDoesNotExist,
     );
     let cap_id = cap_authority::derived_cap_id<VENDOR<VendorKey>, ADMIN>(&registry.id);
     assert!(
         !registry.is_authority_cap_authorized<VENDOR<VendorKey>, ADMIN>(cap_id),
-        authority_cap_already_authorized!(),
+        EAuthorityCapAlreadyAuthorized,
     );
     dynamic_field::add(
         &mut registry.id,
@@ -550,11 +551,11 @@ public fun unfreeze_package(
     registry: &mut Registry,
     _cap: &AuthorityCap<PACKAGE, ADMIN>,
 ) {
-    assert!(registry.is_frozen(), not_frozen!());
+    assert!(registry.is_frozen(), ENotFrozen);
     let resume_version = dynamic_field::remove<_, u64>(&mut registry.id, keys::frozen_version());
-    assert!(resume_version <= 1, invalid_resume_version!());
+    assert!(resume_version <= 1, EInvalidResumeVersion);
     registry.version = resume_version;
-    events::e08(registry.id.to_inner(), resume_version)
+    events::emit_unfroze(registry.id.to_inner(), resume_version)
 }
 
 public fun freeze_package(
@@ -567,7 +568,7 @@ public fun freeze_package(
     dynamic_field::add(&mut registry.id, keys::frozen_version(), resume_version);
     // No package version can satisfy `assert_package_version` until the registry is unfrozen.
     registry.version = std::u64::max_value!();
-    events::e07(registry.id.to_inner(), resume_version, object::id(cap))
+    events::emit_froze(registry.id.to_inner(), resume_version, object::id(cap))
 }
 
 public fun guardian_deauthorize_authority_cap<VendorKey, Role>(
@@ -585,8 +586,8 @@ entry fun upgrade_version<ADMIN_OR_ASSISTANT>(
     cap: &AuthorityCap<PACKAGE, ADMIN_OR_ASSISTANT>,
 ) {
     registry.assert_admin_or_authorized_assistant_authority_cap(cap);
-    assert!(registry.version < 1, invalid_version_upgrade_value!());
-    events::e05(registry.id.to_inner(), 1);
+    assert!(registry.version < 1, EInvalidVersionUpgradeValue);
+    events::emit_upgraded_version(registry.id.to_inner(), 1);
     registry.version = 1
 }
 
@@ -598,7 +599,7 @@ public fun set_integrator_address_with_cap<ADMIN_OR_ASSISTANT>(
 ) {
     registry.assert_package_version();
     registry.assert_admin_or_authorized_assistant_authority_cap(cap);
-    assert!(registry.is_integrator_id_registered(integrator_id), invalid_integrator_id!());
+    assert!(registry.is_integrator_id_registered(integrator_id), EInvalidIntegratorId);
     registry.set_integrator_address_(integrator_id, new_integrator_address)
 }
 
@@ -616,7 +617,7 @@ public fun set_collateral_info<T, ADMIN_OR_ASSISTANT>(
     );
     info.collateral_storage_id = pfs.storage_id();
     info.collateral_source_id = source_id;
-    events::e28<T>(info.collateral_storage_id, info.collateral_source_id, info.scaling_factor)
+    events::emit_registered_collateral_info<T>(info.collateral_storage_id, info.collateral_source_id, info.scaling_factor)
 }
 
 public fun set_config<ADMIN_OR_ASSISTANT>(
@@ -728,66 +729,66 @@ public fun set_config<ADMIN_OR_ASSISTANT>(
     assert!(
         ifixed::greater_than_eq(max_abs_maker_fee, 0)
             && ifixed::less_than_eq(max_abs_maker_fee, 1_000_000_000_000_000_000),
-        invalid_max_abs_maker_fee!(),
+        EInvalidMaxAbsMakerFee,
     );
     assert!(
         ifixed::greater_than_eq(max_abs_taker_fee, 0)
             && ifixed::less_than_eq(max_abs_taker_fee, 1_000_000_000_000_000_000),
-        invalid_max_abs_taker_fee!(),
+        EInvalidMaxAbsTakerFee,
     );
     assert!(
         ifixed::greater_than_eq(max_liquidation_fee, 0)
             && ifixed::less_than_eq(max_liquidation_fee, 1_000_000_000_000_000_000),
-        invalid_max_liquidation_fee!(),
+        EInvalidMaxLiquidationFee,
     );
     assert!(
         ifixed::greater_than_eq(max_insurance_fund_fee, 0)
             && ifixed::less_than_eq(max_insurance_fund_fee, 1_000_000_000_000_000_000),
-        invalid_max_insurance_fund_fee!(),
+        EInvalidMaxInsuranceFundFee,
     );
     assert!(
         min_funding_frequency_ms > 0
             && min_funding_frequency_ms < min_funding_period_ms
             && min_funding_period_ms < max_funding_period_ms,
-        invalid_funding_parameter_bounds!(),
+        EInvalidFundingParameterBounds,
     );
     assert!(
         min_premium_twap_frequency_ms > 0
             && min_premium_twap_period_ms >= min_premium_twap_frequency_ms,
-        invalid_premium_twap_bounds!(),
+        EInvalidPremiumTwapBounds,
     );
     assert!(
         min_spread_twap_frequency_ms > 0
             && min_spread_twap_period_ms >= min_spread_twap_frequency_ms,
-        invalid_spread_twap_bounds!(),
+        EInvalidSpreadTwapBounds,
     );
     assert!(
         min_proposal_delay_ms > 0 && min_proposal_delay_ms <= max_proposal_delay_ms,
-        invalid_proposal_delay_bounds!(),
+        EInvalidProposalDelayBounds,
     );
     assert!(
         ifixed::greater_than_eq(low_min_order_usd_value, 0)
             && ifixed::less_than_eq(low_min_order_usd_value, up_min_order_usd_value),
-        invalid_min_order_usd_value_bounds!(),
+        EInvalidMinOrderUsdValueBounds,
     );
     assert!(
         ifixed::greater_than_eq(insurance_open_interest_fraction, 0)
             && ifixed::less_than_eq(insurance_open_interest_fraction, 1_000_000_000_000_000_000),
-        invalid_insurance_open_interest_fraction!(),
+        EInvalidInsuranceOpenInterestFraction,
     );
-    assert!(min_oracle_tolerance > 0, invalid_min_oracle_tolerance!());
+    assert!(min_oracle_tolerance > 0, EInvalidMinOracleTolerance);
     assert!(
         ifixed::greater_than_eq(max_book_index_spread, 0)
             && ifixed::less_than_eq(max_book_index_spread, 1_000_000_000_000_000_000),
-        invalid_max_book_index_spread!(),
+        EInvalidMaxBookIndexSpread,
     );
     assert!(
         ifixed::greater_than_eq(max_index_twap_divergence, 0)
             && ifixed::less_than_eq(max_index_twap_divergence, 1_000_000_000_000_000_000),
-        invalid_max_index_twap_divergence!(),
+        EInvalidMaxIndexTwapDivergence,
     );
-    assert!(up_max_pending_orders > 0, invalid_up_max_pending_orders!());
-    assert!(max_assistants_per_account > 0, invalid_max_assistants_per_account!());
+    assert!(up_max_pending_orders > 0, EInvalidUpMaxPendingOrders);
+    assert!(max_assistants_per_account > 0, EInvalidMaxAssistantsPerAccount);
 
     let config = registry.config_mut();
     config.stop_order_geunhwa_cost = stop_order_geunhwa_cost;
@@ -826,7 +827,7 @@ public fun register_vendor<VendorKey, ADMIN_OR_ASSISTANT>(
     assert!(
         registry.is_vendor_registration_open()
             || metadata.is_domain_registration_approved<VendorKey, PACKAGE>(),
-        vendor_registration_not_approved!(),
+        EVendorRegistrationNotApproved,
     );
 
     dynamic_field::add(
@@ -836,7 +837,7 @@ public fun register_vendor<VendorKey, ADMIN_OR_ASSISTANT>(
     );
     let admin_cap = authority::create_vendor_admin_cap<VendorKey>(&mut registry.id);
     registry.authorize_authority_cap(&admin_cap);
-    events::e06(type_name::with_defining_ids<VendorKey>(), object::id(&admin_cap));
+    events::emit_registered_vendor(type_name::with_defining_ids<VendorKey>(), object::id(&admin_cap));
     admin_cap
 }
 
@@ -940,11 +941,11 @@ fun set_integrator_address_(
     );
     let previous_integrator_address = registration.integrator_address;
     registration.integrator_address = new_integrator_address;
-    events::e11(integrator_id, previous_integrator_address, new_integrator_address)
+    events::emit_updated_integrator_address(integrator_id, previous_integrator_address, new_integrator_address)
 }
 
 public(package) fun assert_package_version(registry: &Registry) {
-    assert!(registry.version <= 1, invalid_version!())
+    assert!(registry.version <= 1, EInvalidVersion)
 }
 
 public(package) fun assert_authority_cap_is_authorized<Context, Role>(
@@ -985,16 +986,8 @@ public(package) fun assert_admin_or_authorized_assistant_or_maintenance_authorit
 ) {
     authority::assert_is_admin_or_assistant_or_maintenance<Role>();
     let role = type_name::with_defining_ids<Role>();
-    // Operands are bound first, as in `authority`'s role checks.
-    let is_assistant_or_maintenance = {
-        let actual = role;
-        let expected = type_name::with_defining_ids<ASSISTANT>();
-        actual == expected
-    } || {
-        let actual = role;
-        let expected = type_name::with_defining_ids<MAINTENANCE>();
-        actual == expected
-    };
+    let is_assistant_or_maintenance = role == type_name::with_defining_ids<ASSISTANT>()
+        || role == type_name::with_defining_ids<MAINTENANCE>();
     if (is_assistant_or_maintenance) {
         registry.assert_authority_cap_is_authorized(cap)
     } else {
@@ -1008,7 +1001,7 @@ fun assert_authority_cap_id_is_authorized<Context, Role>(
 ) {
     assert!(
         registry.is_authority_cap_authorized<Context, Role>(cap_id),
-        authority_cap_not_authorized!(),
+        EAuthorityCapNotAuthorized,
     )
 }
 
@@ -1022,7 +1015,7 @@ public(package) fun assert_vendor_has_ownership_over_clearing_house<VendorKey, R
         keys::vendor_clearing_house_key<VendorKey>(),
     );
     let idx = clearing_house_ids.find_index!(|e| e == clearing_house_id);
-    assert!(idx.is_some(), invalid_vendor!())
+    assert!(idx.is_some(), EInvalidVendor)
 }
 
 public(package) fun assert_integrator_id_is_valid(
@@ -1031,6 +1024,6 @@ public(package) fun assert_integrator_id_is_valid(
 ) {
     assert!(
         registry.is_integrator_id_registered(integrator_id),
-        integrator_registration_does_not_exist!(),
+        EIntegratorRegistrationDoesNotExist,
     )
 }

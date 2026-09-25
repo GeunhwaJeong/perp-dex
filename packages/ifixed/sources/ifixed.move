@@ -14,7 +14,7 @@ module ifixed::ifixed;
 // - `(GREATEST_BIT - m) ^ GREATEST_BIT` turns a magnitude `m` into `-m`, aborting when
 //   `m > 2^255` (the magnitude does not fit in a negative value).
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 const ONE: u256 = 1__000_000_000_000_000_000;
 // All 256 bits set: the raw two's complement encoding of -1. Not part of the published
@@ -22,7 +22,8 @@ const ONE: u256 = 1__000_000_000_000_000_000;
 const MAX_U256: u256 = 115792089237316195423570985008687907853269984665640564039457584007913129639935u256;
 const GREATEST_BIT: u256 = (1 << 255);
 const NOT_GREATEST_BIT: u256 = (1 << 255) - 1;
-const OVERFLOW_ERROR: u64 = 12001;
+const EOverflow: u64 = 12001;
+const EInvalidDecimals: u64 = 0;
 const SCALING_FACTORS: vector<u64> = vector<u64>[
     1__000_000_000_000_000_000,
     0__100_000_000_000_000_000,
@@ -49,7 +50,7 @@ const SCALING_FACTORS: vector<u64> = vector<u64>[
 
 #[allow(implicit_const_copy)]
 public fun decimal_scalar_from_decimals(decimals: u64): u64 {
-    assert!(decimals <= 18, 0);
+    assert!(decimals <= 18, EInvalidDecimals);
     SCALING_FACTORS[decimals]
 }
 
@@ -70,7 +71,7 @@ public fun max_value(): u256 {
 }
 
 public fun overflow_error(): u64 {
-    OVERFLOW_ERROR
+    EOverflow
 }
 
 public fun is_cast_safe(x: u256): bool {
@@ -82,7 +83,7 @@ public fun from_u64(a: u64): u256 {
 }
 
 public fun to_u64(x: u256): u64 {
-    assert!(x < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(x < GREATEST_BIT, EOverflow);
     ((x / ONE) as u64)
 }
 
@@ -95,7 +96,7 @@ public fun from_u128(a: u128): u256 {
 }
 
 public fun to_u128(x: u256): u128 {
-    assert!(x < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(x < GREATEST_BIT, EOverflow);
     ((x / ONE) as u128)
 }
 
@@ -105,12 +106,12 @@ public fun from_u128fraction(numerator: u128, denominator: u128): u256 {
 
 public fun from_u256(x: u256): u256 {
     let fixed = x * ONE;
-    assert!(fixed < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(fixed < GREATEST_BIT, EOverflow);
     fixed
 }
 
 public fun to_u256(x: u256): u256 {
-    assert!(x < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(x < GREATEST_BIT, EOverflow);
     x / ONE
 }
 
@@ -120,34 +121,34 @@ public fun from_u256fraction(numerator: u256, denominator: u256): u256 {
 
 public fun from_balance(balance: u64, scaling_factor: u256): u256 {
     let fixed = (balance as u256) * scaling_factor;
-    assert!(fixed < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(fixed < GREATEST_BIT, EOverflow);
     fixed
 }
 
 public fun to_balance(x: u256, scaling_factor: u256): u64 {
-    assert!(x < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(x < GREATEST_BIT, EOverflow);
     ((x / scaling_factor) as u64)
 }
 
 public fun from_u128balance(balance: u128, scaling_factor: u256): u256 {
     let fixed = (balance as u256) * scaling_factor;
-    assert!(fixed < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(fixed < GREATEST_BIT, EOverflow);
     fixed
 }
 
 public fun to_u128balance(x: u256, scaling_factor: u256): u128 {
-    assert!(x < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(x < GREATEST_BIT, EOverflow);
     ((x / scaling_factor) as u128)
 }
 
 public fun from_u256balance(balance: u256, scaling_factor: u256): u256 {
     let fixed = balance * scaling_factor;
-    assert!(fixed < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(fixed < GREATEST_BIT, EOverflow);
     fixed
 }
 
 public fun to_u256balance(x: u256, scaling_factor: u256): u256 {
-    assert!(x < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(x < GREATEST_BIT, EOverflow);
     x / scaling_factor
 }
 
@@ -157,7 +158,7 @@ public fun add(x: u256, y: u256): u256 {
     // and its sign bit is the complement of that carry.
     let low_bits_sum = (x & NOT_GREATEST_BIT) + (y & NOT_GREATEST_BIT);
     if (x ^ y < GREATEST_BIT) {
-        assert!(x ^ low_bits_sum < GREATEST_BIT, OVERFLOW_ERROR);
+        assert!(x ^ low_bits_sum < GREATEST_BIT, EOverflow);
         return low_bits_sum
     };
     low_bits_sum ^ GREATEST_BIT
@@ -171,7 +172,7 @@ public fun sub(x: u256, y: u256): u256 {
         difference = ((y - x) ^ MAX_U256) + 1;
     };
     // Only operands of opposite signs can overflow; the result must then keep the sign of `x`.
-    assert!(x ^ y < GREATEST_BIT || x ^ difference < GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(x ^ y < GREATEST_BIT || x ^ difference < GREATEST_BIT, EOverflow);
     difference
 }
 
@@ -230,7 +231,7 @@ public fun div(x: u256, y: u256): u256 {
     if (x ^ y < GREATEST_BIT || x == 0) {
         let scaled_x = ONE * (if (x >= GREATEST_BIT) (x ^ MAX_U256) + 1 else x);
         let quotient = scaled_x / (if (y >= GREATEST_BIT) (y ^ MAX_U256) + 1 else y);
-        assert!(quotient < GREATEST_BIT, OVERFLOW_ERROR);
+        assert!(quotient < GREATEST_BIT, EOverflow);
         return quotient
     };
     let scaled_x = ONE * (if (x >= GREATEST_BIT) (x ^ MAX_U256) + 1 else x) - 1;
@@ -242,7 +243,7 @@ public fun div_toward_zero(x: u256, y: u256): u256 {
     let scaled_x = ONE * (if (x >= GREATEST_BIT) (x ^ MAX_U256) + 1 else x);
     let quotient = scaled_x / (if (y >= GREATEST_BIT) (y ^ MAX_U256) + 1 else y);
     if (x ^ y < GREATEST_BIT || x == 0) {
-        assert!(quotient < GREATEST_BIT, OVERFLOW_ERROR);
+        assert!(quotient < GREATEST_BIT, EOverflow);
         return quotient
     };
     (GREATEST_BIT - quotient) ^ GREATEST_BIT
@@ -255,7 +256,7 @@ public fun div_up(x: u256, y: u256): u256 {
     if (x ^ y < GREATEST_BIT) {
         let scaled_x = ONE * (if (x >= GREATEST_BIT) (x ^ MAX_U256) + 1 else x) - 1;
         let quotient = scaled_x / (if (y >= GREATEST_BIT) (y ^ MAX_U256) + 1 else y) + 1;
-        assert!(quotient < GREATEST_BIT, OVERFLOW_ERROR);
+        assert!(quotient < GREATEST_BIT, EOverflow);
         return quotient
     };
     let scaled_x = ONE * (if (x >= GREATEST_BIT) (x ^ MAX_U256) + 1 else x);
@@ -269,7 +270,7 @@ public fun div_away_from_zero(x: u256, y: u256): u256 {
     let scaled_x = ONE * (if (x >= GREATEST_BIT) (x ^ MAX_U256) + 1 else x) - 1;
     let quotient = scaled_x / (if (y >= GREATEST_BIT) (y ^ MAX_U256) + 1 else y) + 1;
     if (x ^ y < GREATEST_BIT) {
-        assert!(quotient < GREATEST_BIT, OVERFLOW_ERROR);
+        assert!(quotient < GREATEST_BIT, EOverflow);
         return quotient
     };
     (GREATEST_BIT - quotient) ^ GREATEST_BIT
@@ -338,9 +339,9 @@ public fun mul_i256(x: u256, y: u256): u256 {
     let x_abs = if (x >= GREATEST_BIT) (x ^ MAX_U256) + 1 else x;
     let product = x_abs * (if (y >= GREATEST_BIT) (y ^ MAX_U256) + 1 else y);
     if (x ^ y < GREATEST_BIT) {
-        assert!(product < GREATEST_BIT, OVERFLOW_ERROR);
+        assert!(product < GREATEST_BIT, EOverflow);
         return product
     };
-    assert!(product <= GREATEST_BIT, OVERFLOW_ERROR);
+    assert!(product <= GREATEST_BIT, EOverflow);
     (GREATEST_BIT - product) ^ GREATEST_BIT
 }

@@ -13,7 +13,7 @@ use market_making_vault::keys;
 use std::type_name;
 use std::u64;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 #[error(code = 0)]
 const EConfigAlreadyCreated: vector<u8> = b"The package config has already been created.";

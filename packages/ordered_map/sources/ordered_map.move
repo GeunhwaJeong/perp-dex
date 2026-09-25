@@ -6,7 +6,7 @@ module ordered_map::ordered_map;
 use haneul::dynamic_field;
 use ordered_map::enum_option::{Self, Option};
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 const LEAF_FLAG: u64 = 0x8000_0000_0000_0000;
 #[error(code = 0x80)]
@@ -20,7 +20,7 @@ const EDestroyNotEmpty: vector<u8> = b"Cannot destroy a non-empty map";
 #[error(code = 0x84)]
 const EMapTooSmall: vector<u8> = b"Map must have more than 3 entries to change parameters";
 
-// === Constants the bodies use that have no named counterpart in the interface ===
+// === Constants ===
 
 const EMPTY_PTRS: vector<u64> = vector[];
 

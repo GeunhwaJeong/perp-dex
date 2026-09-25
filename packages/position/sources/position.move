@@ -5,11 +5,11 @@ module position::position;
 
 use ifixed::ifixed;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
-macro fun initial_margin_requirement_violated(): u64 { 2001 }
-macro fun position_bad_debt(): u64 { 2002 }
-macro fun invalid_position_imr(): u64 { 2003 }
+const EInitialMarginRequirementViolated: u64 = 2001;
+const EPositionBadDebt: u64 = 2002;
+const EInvalidPositionImr: u64 = 2003;
 
 // === Types ===
 
@@ -263,7 +263,7 @@ public fun set_initial_margin_ratio(
     assert!(
         ifixed::greater_than_eq(initial_margin_ratio, market_initial_margin_ratio)
             && ifixed::less_than_eq(initial_margin_ratio, 1_000_000_000_000_000_000),
-        invalid_position_imr!(),
+        EInvalidPositionImr,
     );
     position.initial_margin_ratio = initial_margin_ratio
 }
@@ -504,26 +504,26 @@ public fun ensure_margin_requirements(
     // Below the requirement, the action must reduce risk: the position had a requirement before,
     // stays solvent, neither raises the requirement nor flips sides, and does not worsen its
     // margin ratio.
-    assert!(min_margin_before != 0, initial_margin_requirement_violated!());
+    assert!(min_margin_before != 0, EInitialMarginRequirementViolated);
     assert!(
         !ifixed::is_neg(margin_now) && !ifixed::is_neg(margin_before),
-        position_bad_debt!(),
+        EPositionBadDebt,
     );
     let requirement_not_increased = ifixed::less_than_eq(min_margin_now, min_margin_before);
     let same_side = base_before == 0
         || (base_now == 0 || ifixed::is_neg(base_before) == ifixed::is_neg(base_now));
-    assert!(requirement_not_increased && same_side, initial_margin_requirement_violated!());
+    assert!(requirement_not_increased && same_side, EInitialMarginRequirementViolated);
     if (ifixed::greater_than_eq(margin_now, margin_before)) {
         return
     };
-    assert!(min_margin_now != min_margin_before, initial_margin_requirement_violated!());
+    assert!(min_margin_now != min_margin_before, EInitialMarginRequirementViolated);
     // margin_now / min_margin_now >= margin_before / min_margin_before, cross-multiplied.
     assert!(
         ifixed::greater_than_eq(
             ifixed::mul(margin_now, min_margin_before),
             ifixed::mul(margin_before, min_margin_now),
         ),
-        initial_margin_requirement_violated!(),
+        EInitialMarginRequirementViolated,
     )
 }
 

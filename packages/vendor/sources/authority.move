@@ -8,7 +8,7 @@ use haneul::address;
 use haneul::types;
 use std::type_name;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 const EAuthorityCapAlreadyCreated: u64 = 0;
 

@@ -10,7 +10,7 @@ use oracle_aggregator::{
     source::{Self as aggregator_source, Source},
 };
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 const CURRENT_VERSION: u64 = 1;
 

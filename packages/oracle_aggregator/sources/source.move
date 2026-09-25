@@ -9,7 +9,7 @@ use oracle_aggregator::authority::{Self, PACKAGE, SourceCap};
 use oracle_aggregator::config::Config;
 use oracle_aggregator::events;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 #[error(code = 0)]
 const EInvalidVersion: vector<u8> =

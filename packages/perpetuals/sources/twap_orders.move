@@ -18,21 +18,21 @@ use perpetuals::events;
 use perpetuals::registry::Registry;
 use std::bcs;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
-macro fun invalid_order_details(): u64 { 6300 }
-macro fun twap_order_ticket_expired(): u64 { 6301 }
-macro fun twap_order_amount_uncertainty_violated(): u64 { 6302 }
-macro fun twap_order_execution_gap_violated(): u64 { 6303 }
-macro fun twap_order_fully_executed(): u64 { 6304 }
-macro fun twap_order_executed_after_retry_time(): u64 { 6305 }
-macro fun twap_order_invalid_executor(): u64 { 6306 }
-macro fun twap_order_cannot_edit_active_order(): u64 { 6307 }
-macro fun twap_order_not_completed(): u64 { 6308 }
-macro fun twap_order_invalid_clearing_house(): u64 { 6309 }
-macro fun twap_order_first_run_expired(): u64 { 6310 }
-macro fun invalid_twap_order_gas_price(): u64 { 6311 }
-macro fun twap_order_invalid_lot_size(): u64 { 6312 }
+const EInvalidOrderDetails: u64 = 6300;
+const ETwapOrderTicketExpired: u64 = 6301;
+const ETwapOrderAmountUncertaintyViolated: u64 = 6302;
+const ETwapOrderExecutionGapViolated: u64 = 6303;
+const ETwapOrderFullyExecuted: u64 = 6304;
+const ETwapOrderExecutedAfterRetryTime: u64 = 6305;
+const ETwapOrderInvalidExecutor: u64 = 6306;
+const ETwapOrderCannotEditActiveOrder: u64 = 6307;
+const ETwapOrderNotCompleted: u64 = 6308;
+const ETwapOrderInvalidClearingHouse: u64 = 6309;
+const ETwapOrderFirstRunExpired: u64 = 6310;
+const EInvalidTwapOrderGasPrice: u64 = 6311;
+const ETwapOrderInvalidLotSize: u64 = 6312;
 
 // === Types ===
 
@@ -90,7 +90,7 @@ public fun new_details(
     integrator_info: Option<IntegratorInfo>,
     salt: vector<u8>
 ): TWAPOrderDetails {
-    assert!(size != 0 && chunks_amount != 0 && size >= chunks_amount, invalid_order_details!());
+    assert!(size != 0 && chunks_amount != 0 && size >= chunks_amount, EInvalidOrderDetails);
     TWAPOrderDetails {
         first_run_expire_timestamp,
         expire_timestamp,
@@ -151,7 +151,7 @@ public fun create_twap_order_ticket<T, ADMIN_OR_ASSISTANT>(
         retry_anchor_timestamp_ms: 0,
         last_execution_timestamp_ms: 0,
     };
-    events::e36<T>(
+    events::emit_created_twap_order_ticket<T>(
         ticket.id.to_inner(),
         clearing_house_id,
         account_id,
@@ -194,7 +194,7 @@ public fun cancel<T>(
     } else {
         0
     };
-    events::e39<T>(
+    events::emit_canceled_twap_order_ticket<T>(
         ticket.id.to_inner(),
         ticket.account_id,
         executor_address,
@@ -218,7 +218,7 @@ public fun cancel<T>(
         last_execution_timestamp_ms: _,
         paid_execution_gas: _,
     } = ticket;
-    events::e40<T>(id.to_inner(), account_id, executor_address);
+    events::emit_deleted_twap_order_ticket<T>(id.to_inner(), account_id, executor_address);
     id.delete();
     coin::from_balance(gas, ctx)
 }
@@ -253,7 +253,7 @@ public fun user_cancel_twap_order<T, Role>(
     } else {
         0
     };
-    events::e39<T>(
+    events::emit_canceled_twap_order_ticket<T>(
         ticket.id.to_inner(),
         ticket.account_id,
         sender,
@@ -277,7 +277,7 @@ public fun user_cancel_twap_order<T, Role>(
         last_execution_timestamp_ms: _,
         paid_execution_gas: _,
     } = ticket;
-    events::e40<T>(id.to_inner(), account_id, sender);
+    events::emit_deleted_twap_order_ticket<T>(id.to_inner(), account_id, sender);
     id.delete();
     coin::from_balance(gas, ctx)
 }
@@ -300,7 +300,7 @@ public fun finalize<T>(
     ticket.assert_valid_ticket_executor(executor);
     ticket.assert_valid_ticket_clearing_house(object::id(clearing_house));
     assert_order_details_are_valid(new_details, &ticket.encrypted_details);
-    assert!(ticket.is_complete(new_details.size), twap_order_not_completed!());
+    assert!(ticket.is_complete(new_details.size), ETwapOrderNotCompleted);
 
     let deallocated_collateral;
     if (!clearing_house.is_market_paused()) {
@@ -314,7 +314,7 @@ public fun finalize<T>(
     } else {
         deallocated_collateral = 0;
     };
-    events::e38<T>(
+    events::emit_finalized_twap_order_ticket<T>(
         ticket.id.to_inner(),
         ticket.account_id,
         executor_address,
@@ -337,7 +337,7 @@ public fun finalize<T>(
         last_execution_timestamp_ms: _,
         paid_execution_gas: _,
     } = ticket;
-    events::e40<T>(id.to_inner(), account_id, executor_address);
+    events::emit_deleted_twap_order_ticket<T>(id.to_inner(), account_id, executor_address);
     id.delete();
     coin::from_balance(gas, ctx)
 }
@@ -391,7 +391,7 @@ public fun execute<T>(
 ): (SessionSummary, Coin<HANEUL>, ClearingHouse<T>) {
     clearing_house.assert_package_version();
     clearing_house.assert_market_is_not_paused();
-    assert!(ctx.gas_price() == ctx.reference_gas_price(), invalid_twap_order_gas_price!());
+    assert!(ctx.gas_price() == ctx.reference_gas_price(), EInvalidTwapOrderGasPrice);
 
     account.assert_order_ticket_exists(twap_order_ticket_id);
     let mut ticket: TWAPOrderTicket<T> = account.remove_order_ticket(twap_order_ticket_id);
@@ -402,19 +402,15 @@ public fun execute<T>(
     ticket.assert_twap_order_can_be_executed(new_details, amount, now, lot_size);
     let account_id = ticket.account_id;
 
-    // The blocks below correspond to macros of the original source: their leading bindings are
-    // the macro parameters, kept so that the compiled code matches the published bytecode.
-
     // Amount newly scheduled by this run, and the order size (which also retries the scheduled
     // but unfilled amount of earlier runs).
     let (newly_scheduled_amount, execution_amount) = {
-        let (ticket, details, lot_size) = (&ticket, new_details, lot_size);
-        let chunk_amount = target_chunk_amount(details, lot_size);
+        let chunk_amount = target_chunk_amount(new_details, lot_size);
         let unfilled_amount = ticket.unfilled_scheduled_amount();
-        let unscheduled_amount = details.size - ticket.scheduled_amount;
+        let unscheduled_amount = new_details.size - ticket.scheduled_amount;
         let mut amount = amount;
         let tail_merge_threshold =
-            (chunk_amount as u128) * (details.small_tail_merge_threshold_bps as u128);
+            (chunk_amount as u128) * (new_details.small_tail_merge_threshold_bps as u128);
         let tail = unscheduled_amount % chunk_amount;
         // With one chunk left plus a small tail, the tail is merged into this last chunk.
         let merge_tail = unscheduled_amount / chunk_amount == 1
@@ -426,10 +422,9 @@ public fun execute<T>(
             amount = amount.min(unscheduled_amount);
         };
         let max_chunk_amount = {
-            let details = details;
-            let max_execution_bps = details.max_one_execution_amount_bps.min(10000);
+            let max_execution_bps = new_details.max_one_execution_amount_bps.min(10000);
             let max_amount =
-                (((details.size as u128) * (max_execution_bps as u128) / 10000) as u64);
+                (((new_details.size as u128) * (max_execution_bps as u128) / 10000) as u64);
             max_amount - max_amount % lot_size
         };
         let max_execution_amount = if (merge_tail) {
@@ -446,7 +441,7 @@ public fun execute<T>(
         let execution_amount = amount + retry_amount;
         assert!(
             execution_amount <= max_execution_amount,
-            twap_order_amount_uncertainty_violated!(),
+            ETwapOrderAmountUncertaintyViolated,
         );
         (amount, execution_amount)
     };
@@ -462,9 +457,8 @@ public fun execute<T>(
     // Worst accepted price: the mark price moved against the order by the maximum slippage,
     // rounded to the tick size towards the mark price.
     let limit_price = {
-        let (session, details) = (&session, new_details);
-        let max_slippage = ifixed::from_u64fraction(details.max_slippage_bps, 10000);
-        let is_bid = details.side == false;
+        let max_slippage = ifixed::from_u64fraction(new_details.max_slippage_bps, 10000);
+        let is_bid = new_details.side == false;
         let tick_size = session.clearing_house().market_params().tick_size();
         let one = 1_000_000_000_000_000_000;
         let slippage_factor;
@@ -513,9 +507,8 @@ public fun execute<T>(
     );
 
     {
-        let (ticket, details) = (&mut ticket, new_details);
         let filled_amount;
-        if (details.side == false) {
+        if (new_details.side == false) {
             filled_amount = ifixed::to_balance(summary.base_filled_bid(), 1_000_000_000);
         } else {
             filled_amount = ifixed::to_balance(summary.base_filled_ask(), 1_000_000_000);
@@ -530,7 +523,7 @@ public fun execute<T>(
             ticket.last_execution_timestamp_ms = now;
             ticket.processed_amount = ticket.processed_amount + filled_amount
         };
-        events::e37<T>(
+        events::emit_processed_twap_order_ticket<T>(
             ticket.id.to_inner(),
             account_id,
             execution_amount,
@@ -547,7 +540,6 @@ public fun execute<T>(
     // The executor is paid the share of the gas budget matching the processed fraction of the
     // order, minus what earlier runs already paid.
     let gas_payment = {
-        let ticket = &mut ticket;
         let processed_amount = ticket.processed_amount.min(new_details.size);
         let earned_gas = (
             (ticket.gas_execution_budget as u128) * (processed_amount as u128)
@@ -576,9 +568,9 @@ public fun set_details<T, ADMIN_OR_ASSISTANT>(
     account.assert_order_ticket_exists(twap_order_ticket_id);
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
     let ticket: &mut TWAPOrderTicket<T> = account.borrow_mut_order_ticket(twap_order_ticket_id);
-    assert!(!ticket.has_attempts(), twap_order_cannot_edit_active_order!());
+    assert!(!ticket.has_attempts(), ETwapOrderCannotEditActiveOrder);
     ticket.encrypted_details = encrypted_details;
-    events::e41<T>(ticket.id.to_inner(), ticket.account_id, encrypted_details)
+    events::emit_edited_twap_order_ticket_details<T>(ticket.id.to_inner(), ticket.account_id, encrypted_details)
 }
 
 public fun set_executors<T, ADMIN_OR_ASSISTANT>(
@@ -593,9 +585,9 @@ public fun set_executors<T, ADMIN_OR_ASSISTANT>(
     account.assert_order_ticket_exists(twap_order_ticket_id);
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
     let ticket: &mut TWAPOrderTicket<T> = account.borrow_mut_order_ticket(twap_order_ticket_id);
-    assert!(!ticket.has_attempts(), twap_order_cannot_edit_active_order!());
+    assert!(!ticket.has_attempts(), ETwapOrderCannotEditActiveOrder);
     ticket.executors = executors;
-    events::e42<T>(ticket.id.to_inner(), ticket.account_id, executors)
+    events::emit_edited_twap_order_ticket_executors<T>(ticket.id.to_inner(), ticket.account_id, executors)
 }
 
 /// The ticket only stores `blake2b256(bcs(details))`; executors reveal the details on each call.
@@ -605,7 +597,7 @@ fun assert_order_details_are_valid(
 ) {
     assert!(
         hash::blake2b256(&bcs::to_bytes(new_details)) == *encrypted_details,
-        invalid_order_details!(),
+        EInvalidOrderDetails,
     )
 }
 
@@ -619,7 +611,7 @@ public(package) fun assert_amount_within_uncertainty(
         (target_amount as u128) * (new_details.amount_uncertainty_bps as u128) / 10000;
     assert!(
         (desired_amount.diff(target_amount) as u128) <= max_deviation,
-        twap_order_amount_uncertainty_violated!(),
+        ETwapOrderAmountUncertaintyViolated,
     )
 }
 
@@ -632,7 +624,7 @@ fun assert_lot_compatible(
         new_details.size % lot_size == 0
             && new_details.size / lot_size >= new_details.chunks_amount
             && desired_amount % lot_size == 0,
-        twap_order_invalid_lot_size!(),
+        ETwapOrderInvalidLotSize,
     )
 }
 
@@ -640,7 +632,7 @@ fun assert_valid_ticket_clearing_house<T>(
     ticket: &TWAPOrderTicket<T>,
     clearing_house_id: ID,
 ) {
-    assert!(ticket.clearing_house_id == clearing_house_id, twap_order_invalid_clearing_house!())
+    assert!(ticket.clearing_house_id == clearing_house_id, ETwapOrderInvalidClearingHouse)
 }
 
 fun assert_valid_ticket_executor<T>(
@@ -649,8 +641,8 @@ fun assert_valid_ticket_executor<T>(
 ) {
     let executors = &ticket.executors;
     let executor_address = executor.executor_sender();
-    assert!(executors.contains(&executor_address), twap_order_invalid_executor!());
-    assert!(ticket.execution_domain == executor.executor_domain(), twap_order_invalid_executor!())
+    assert!(executors.contains(&executor_address), ETwapOrderInvalidExecutor);
+    assert!(ticket.execution_domain == executor.executor_domain(), ETwapOrderInvalidExecutor)
 }
 
 fun assert_execution_gap_within_uncertainty(
@@ -663,7 +655,7 @@ fun assert_execution_gap_within_uncertainty(
     assert!(
         new_details.execution_gap_ms - actual_execution_gap_ms
             <= new_details.execution_time_uncertainty_ms,
-        twap_order_execution_gap_violated!(),
+        ETwapOrderExecutionGapViolated,
     )
 }
 
@@ -676,7 +668,7 @@ fun assert_twap_order_can_be_executed<T>(
 ) {
     assert_order_details_are_valid(new_details, &ticket.encrypted_details);
     assert_lot_compatible(new_details, amount, lot_size);
-    assert!(ticket.processed_amount < new_details.size, twap_order_fully_executed!());
+    assert!(ticket.processed_amount < new_details.size, ETwapOrderFullyExecuted);
     // Only the first run is bound by `first_run_expire_timestamp`.
     if (!ticket.is_first_execution()) {
         // Not the first run.
@@ -685,13 +677,13 @@ fun assert_twap_order_can_be_executed<T>(
     } else {
         assert!(
             timestamp_ms < *new_details.first_run_expire_timestamp.borrow(),
-            twap_order_first_run_expired!(),
+            ETwapOrderFirstRunExpired,
         )
     };
     let _ = ticket;
     let expire_timestamp = new_details.expire_timestamp;
     let is_expired = expire_timestamp.is_some() && timestamp_ms > *expire_timestamp.borrow();
-    assert!(!is_expired, twap_order_ticket_expired!());
+    assert!(!is_expired, ETwapOrderTicketExpired);
     assert_amount_within_uncertainty(new_details, amount, lot_size);
     // Later runs must respect the execution gap and the retry window.
     let active = ticket;
@@ -702,7 +694,7 @@ fun assert_twap_order_can_be_executed<T>(
         assert_execution_gap_within_uncertainty(new_details, execution_gap_ms);
         assert!(
             active.is_not_spoiled(new_details, timestamp_ms),
-            twap_order_executed_after_retry_time!(),
+            ETwapOrderExecutedAfterRetryTime,
         )
     }
 }

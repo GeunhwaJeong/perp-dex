@@ -11,7 +11,7 @@ use oracle_aggregator::events;
 use oracle_aggregator::price_feed::{Self, PriceFeed};
 use std::string::String;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 #[error(code = 0)]
 const EInvalidSourceObjectForFeed: vector<u8> =

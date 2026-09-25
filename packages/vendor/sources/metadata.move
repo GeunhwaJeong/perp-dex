@@ -13,7 +13,7 @@ use vendor::authority::VENDOR;
 use vendor::config::Config;
 use vendor::events;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 const EVendorMetadataAlreadyCreated: u64 = 0;
 const ERestrictedKey: u64 = 1;

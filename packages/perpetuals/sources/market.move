@@ -9,35 +9,35 @@ use oracle_aggregator::price_feed_storage::PriceFeedStorage;
 use perpetuals::events;
 use perpetuals::registry::Config;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
-macro fun bad_index_price(): u64 { 1000 }
-macro fun invalid_base_price_feed_storage(): u64 { 1001 }
-macro fun invalid_collateral_price_feed_storage(): u64 { 1002 }
-macro fun index_twap_divergence(): u64 { 1003 }
-macro fun priority_gas_price_not_allowed(): u64 { 1004 }
-macro fun invalid_lot_and_tick_size_update(): u64 { 1007 }
-macro fun invalid_min_order_usd_value(): u64 { 1008 }
-macro fun invalid_max_pending_orders(): u64 { 1009 }
-macro fun invalid_max_open_interest(): u64 { 1010 }
-macro fun invalid_max_open_interest_position_percent(): u64 { 1011 }
-macro fun invalid_max_open_interest_position_threshold(): u64 { 1012 }
-macro fun invalid_max_bad_debt(): u64 { 1013 }
-macro fun invalid_max_socialize_losses_mr_decrease(): u64 { 1014 }
-macro fun invalid_collateral_haircut(): u64 { 1015 }
-macro fun invalid_margin_ratios(): u64 { 1016 }
-macro fun invalid_funding_parameters(): u64 { 1017 }
-macro fun invalid_priority_taker_fee(): u64 { 1018 }
-macro fun invalid_twap_parameters(): u64 { 1019 }
-macro fun invalid_market_fees(): u64 { 1020 }
-macro fun negative_maker_fee_not_covered(): u64 { 1021 }
-macro fun negative_taker_fee_not_covered(): u64 { 1022 }
-macro fun invalid_liquidation_fees(): u64 { 1023 }
-macro fun liquidation_fees_exceed_maintenance_margin_ratio(): u64 { 1024 }
-macro fun invalid_oracle_tolerance(): u64 { 1025 }
-macro fun invalid_lot_and_tick_sizes(): u64 { 1026 }
-macro fun invalid_max_book_index_spread(): u64 { 1027 }
-macro fun invalid_max_index_twap_divergence(): u64 { 1028 }
+const EBadIndexPrice: u64 = 1000;
+const EInvalidBasePriceFeedStorage: u64 = 1001;
+const EInvalidCollateralPriceFeedStorage: u64 = 1002;
+const EIndexTwapDivergence: u64 = 1003;
+const EPriorityGasPriceNotAllowed: u64 = 1004;
+const EInvalidLotAndTickSizeUpdate: u64 = 1007;
+const EInvalidMinOrderUsdValue: u64 = 1008;
+const EInvalidMaxPendingOrders: u64 = 1009;
+const EInvalidMaxOpenInterest: u64 = 1010;
+const EInvalidMaxOpenInterestPositionPercent: u64 = 1011;
+const EInvalidMaxOpenInterestPositionThreshold: u64 = 1012;
+const EInvalidMaxBadDebt: u64 = 1013;
+const EInvalidMaxSocializeLossesMrDecrease: u64 = 1014;
+const EInvalidCollateralHaircut: u64 = 1015;
+const EInvalidMarginRatios: u64 = 1016;
+const EInvalidFundingParameters: u64 = 1017;
+const EInvalidPriorityTakerFee: u64 = 1018;
+const EInvalidTwapParameters: u64 = 1019;
+const EInvalidMarketFees: u64 = 1020;
+const ENegativeMakerFeeNotCovered: u64 = 1021;
+const ENegativeTakerFeeNotCovered: u64 = 1022;
+const EInvalidLiquidationFees: u64 = 1023;
+const ELiquidationFeesExceedMaintenanceMarginRatio: u64 = 1024;
+const EInvalidOracleTolerance: u64 = 1025;
+const EInvalidLotAndTickSizes: u64 = 1026;
+const EInvalidMaxBookIndexSpread: u64 = 1027;
+const EInvalidMaxIndexTwapDivergence: u64 = 1028;
 
 // === Types ===
 
@@ -287,18 +287,18 @@ public(package) fun set_core_params(
     assert!(
         params.core_params.lot_size % lot_size == 0
             && params.core_params.tick_size % tick_size == 0,
-        invalid_lot_and_tick_size_update!(),
+        EInvalidLotAndTickSizeUpdate,
     );
     assert!(
         ifixed::greater_than_eq(collateral_haircut, 0)
             && ifixed::less_than(collateral_haircut, 1_000_000_000_000_000_000),
-        invalid_collateral_haircut!(),
+        EInvalidCollateralHaircut,
     );
 
     params.core_params.lot_size = lot_size;
     params.core_params.tick_size = tick_size;
     params.core_params.collateral_haircut = collateral_haircut;
-    events::e46(*ch_id, lot_size, tick_size, collateral_haircut)
+    events::emit_set_core_params(*ch_id, lot_size, tick_size, collateral_haircut)
 }
 
 public(package) fun update_margin_ratios(
@@ -353,7 +353,7 @@ public(package) fun set_fee_params(
     params.fees_params.liquidation_fee = liquidation_fee;
     params.fees_params.insurance_fund_fee = insurance_fund_fee;
     params.fees_params.priority_taker_fee = priority_taker_fee;
-    events::e44(
+    events::emit_set_fee_params(
         *ch_id,
         maker_fee,
         taker_fee,
@@ -410,7 +410,7 @@ public(package) fun set_twap_params(
     params.twap_params.premium_twap_period_ms = premium_twap_period_ms;
     params.twap_params.spread_twap_frequency_ms = spread_twap_frequency_ms;
     params.twap_params.spread_twap_period_ms = spread_twap_period_ms;
-    events::e45(
+    events::emit_set_twap_params(
         *ch_id,
         funding_frequency_ms,
         funding_period_ms,
@@ -482,21 +482,21 @@ public(package) fun set_risk_limit_params(
                 min_order_usd_value,
                 registry_config.low_min_order_usd_value(),
             ),
-        invalid_min_order_usd_value!(),
+        EInvalidMinOrderUsdValue,
     );
     assert!(
         max_pending_orders > 0 && max_pending_orders <= registry_config.up_max_pending_orders(),
-        invalid_max_pending_orders!(),
+        EInvalidMaxPendingOrders,
     );
     assert!(
         ifixed::greater_than(max_open_interest, 0)
             && ifixed::less_than_eq(max_open_interest_threshold, max_open_interest),
-        invalid_max_open_interest!(),
+        EInvalidMaxOpenInterest,
     );
     assert!(
         ifixed::greater_than_eq(max_book_index_spread, 0)
             && ifixed::less_than_eq(max_book_index_spread, registry_config.max_book_index_spread()),
-        invalid_max_book_index_spread!(),
+        EInvalidMaxBookIndexSpread,
     );
     assert!(
         ifixed::greater_than_eq(max_index_twap_divergence, 0)
@@ -504,22 +504,22 @@ public(package) fun set_risk_limit_params(
                 max_index_twap_divergence,
                 registry_config.max_index_twap_divergence(),
             ),
-        invalid_max_index_twap_divergence!(),
+        EInvalidMaxIndexTwapDivergence,
     );
     assert!(
         ifixed::greater_than(max_open_interest_position_percent, 0)
             && ifixed::less_than_eq(max_open_interest_position_percent, 1_000_000_000_000_000_000),
-        invalid_max_open_interest_position_percent!(),
+        EInvalidMaxOpenInterestPositionPercent,
     );
     assert!(
         ifixed::greater_than(max_open_interest_threshold, 0),
-        invalid_max_open_interest_position_threshold!(),
+        EInvalidMaxOpenInterestPositionThreshold,
     );
-    assert!(ifixed::greater_than_eq(max_bad_debt, 0), invalid_max_bad_debt!());
+    assert!(ifixed::greater_than_eq(max_bad_debt, 0), EInvalidMaxBadDebt);
     assert!(
         ifixed::greater_than_eq(max_socialize_losses_mr_decrease, 0)
             && ifixed::less_than_eq(max_socialize_losses_mr_decrease, 1_000_000_000_000_000_000),
-        invalid_max_socialize_losses_mr_decrease!(),
+        EInvalidMaxSocializeLossesMrDecrease,
     );
 
     params.limits_params.min_order_usd_value = min_order_usd_value;
@@ -531,7 +531,7 @@ public(package) fun set_risk_limit_params(
     params.limits_params.max_index_twap_divergence = max_index_twap_divergence;
     params.limits_params.max_bad_debt = max_bad_debt;
     params.limits_params.max_socialize_losses_mr_decrease = max_socialize_losses_mr_decrease;
-    events::e49(
+    events::emit_set_risk_limit_params(
         *ch_id,
         min_order_usd_value,
         max_pending_orders,
@@ -557,12 +557,12 @@ public(package) fun set_base_oracle_params(
     let oracle_tolerance = option_u64_or(&oracle_tolerance, params.core_params.base_pfs_tolerance);
     assert!(
         oracle_tolerance >= registry_config.min_oracle_tolerance(),
-        invalid_oracle_tolerance!(),
+        EInvalidOracleTolerance,
     );
     params.core_params.base_storage_id = storage_id;
     params.core_params.base_source_id = source_id;
     params.core_params.base_pfs_tolerance = oracle_tolerance;
-    events::e47(*ch_id, storage_id, source_id, oracle_tolerance)
+    events::emit_set_base_oracle_params(*ch_id, storage_id, source_id, oracle_tolerance)
 }
 
 public(package) fun set_collateral_oracle_params(
@@ -580,12 +580,12 @@ public(package) fun set_collateral_oracle_params(
     );
     assert!(
         oracle_tolerance >= registry_config.min_oracle_tolerance(),
-        invalid_oracle_tolerance!(),
+        EInvalidOracleTolerance,
     );
     params.core_params.collateral_storage_id = storage_id;
     params.core_params.collateral_source_id = source_id;
     params.core_params.collateral_pfs_tolerance = oracle_tolerance;
-    events::e48(*ch_id, storage_id, source_id, oracle_tolerance)
+    events::emit_set_collateral_oracle_params(*ch_id, storage_id, source_id, oracle_tolerance)
 }
 
 fun create_market_params(
@@ -743,7 +743,7 @@ public(package) fun add_bad_debt_to_market(
             delta,
         )
     };
-    events::e26(
+    events::emit_socialized_bad_debt(
         *ch_id,
         bad_debt_usd,
         delta,
@@ -755,7 +755,7 @@ public(package) fun add_bad_debt_to_market(
 
 /// Clamps `book` to `index * (1 +/- max_book_index_spread)`.
 public fun clip_max_book_index_spread(params: &MarketParams, book: u256, index: u256): u256 {
-    assert!(index != 0, bad_index_price!());
+    assert!(index != 0, EBadIndexPrice);
     let max_spread = ifixed::mul(index, params.limits_params.max_book_index_spread);
     let upper_bound = ifixed::add(index, max_spread);
     let lower_bound = ifixed::sub(index, max_spread);
@@ -782,7 +782,7 @@ public fun assert_index_twap_divergence_within_limit(
             ifixed::abs(ifixed::sub(index_price, index_twap_price)),
             max_divergence,
         ),
-        index_twap_divergence!(),
+        EIndexTwapDivergence,
     )
 }
 
@@ -807,7 +807,7 @@ public(package) fun try_update_fundings(
     state.cum_funding_rate_long = ifixed::add(state.cum_funding_rate_long, funding_rate);
     state.cum_funding_rate_short = ifixed::add(state.cum_funding_rate_short, funding_rate);
     state.funding_last_upd_ms = now;
-    events::e14(
+    events::emit_updated_funding(
         *ch_id,
         state.cum_funding_rate_long,
         state.cum_funding_rate_short,
@@ -832,7 +832,7 @@ fun update_premium_twap(
         params.twap_params.premium_twap_period_ms,
     );
     state.premium_twap_last_upd_ms = now;
-    events::e12(
+    events::emit_updated_premium_twap(
         *ch_id,
         actual_book_price,
         clipped_book_price,
@@ -859,7 +859,7 @@ fun update_spread_twap(
         params.twap_params.spread_twap_period_ms,
     );
     state.spread_twap_last_upd_ms = now;
-    events::e13(
+    events::emit_updated_spread_twap(
         *ch_id,
         actual_book_price,
         clipped_book_price,
@@ -871,11 +871,7 @@ fun update_spread_twap(
 
 /// Time-weighted average of the new sample `price_now` (weighted by the time elapsed since the
 /// last update) and `last_twap` (weighted by the rest of the TWAP period). Both weights are at
-/// least 1 ms.
-///
-/// Prices are signed IFixed values (two's complement), so the average is computed on magnitudes:
-/// `(x ^ MAX_U256) + 1` is the magnitude of a negative `x`, and `((m ^ (2^255 - 1)) + 1) ^ 2^255`
-/// negates a magnitude `m` (mapping 0 to 0).
+/// least 1 ms. Prices are signed IFixed values; the average is rounded toward zero.
 public fun update_twap(
     price_now: u256,
     last_twap: u256,
@@ -883,64 +879,14 @@ public fun update_twap(
     last_twap_ts: u64,
     twap_period_ms: u64,
 ): u256 {
-    let elapsed_ms;
-    if (time_now <= last_twap_ts) {
-        elapsed_ms = 1;
-    } else {
-        elapsed_ms = time_now - last_twap_ts;
-    };
-    let remaining_ms;
-    if (elapsed_ms >= twap_period_ms) {
-        remaining_ms = 1;
-    } else {
-        remaining_ms = twap_period_ms - elapsed_ms;
-    };
-
-    let price_is_neg =
-        price_now >= 0x8000000000000000000000000000000000000000000000000000000000000000;
-    let twap_is_neg =
-        last_twap >= 0x8000000000000000000000000000000000000000000000000000000000000000;
-    let weighted_price;
-    if (price_is_neg) {
-        weighted_price =
-            ((price_now ^ 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) + 1)
-                * (elapsed_ms as u256);
-    } else {
-        weighted_price = price_now * (elapsed_ms as u256);
-    };
-    let weighted_twap;
-    if (twap_is_neg) {
-        weighted_twap =
-            ((last_twap ^ 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) + 1)
-                * (remaining_ms as u256);
-    } else {
-        weighted_twap = last_twap * (remaining_ms as u256);
-    };
-
-    // Same sign: add the magnitudes and keep the sign.
-    if (price_is_neg == twap_is_neg) {
-        if (price_is_neg) {
-            return ((weighted_price + weighted_twap) / ((elapsed_ms + remaining_ms) as u256)
-                ^ 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) + 1
-                ^ 0x8000000000000000000000000000000000000000000000000000000000000000
-        };
-        return (weighted_price + weighted_twap) / ((elapsed_ms + remaining_ms) as u256)
-    };
-    // Opposite signs: subtract the smaller magnitude; the result has the sign of the larger one.
-    if (weighted_price >= weighted_twap) {
-        if (price_is_neg) {
-            return ((weighted_price - weighted_twap) / ((elapsed_ms + remaining_ms) as u256)
-                ^ 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) + 1
-                ^ 0x8000000000000000000000000000000000000000000000000000000000000000
-        };
-        return (weighted_price - weighted_twap) / ((elapsed_ms + remaining_ms) as u256)
-    };
-    if (twap_is_neg) {
-        return ((weighted_twap - weighted_price) / ((elapsed_ms + remaining_ms) as u256)
-            ^ 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) + 1
-            ^ 0x8000000000000000000000000000000000000000000000000000000000000000
-    };
-    (weighted_twap - weighted_price) / ((elapsed_ms + remaining_ms) as u256)
+    let elapsed_ms = if (time_now <= last_twap_ts) 1 else time_now - last_twap_ts;
+    let remaining_ms = if (elapsed_ms >= twap_period_ms) 1 else twap_period_ms - elapsed_ms;
+    let weighted_sum = ifixed::add(
+        ifixed::mul_i256(price_now, (elapsed_ms as u256)),
+        ifixed::mul_i256(last_twap, (remaining_ms as u256)),
+    );
+    let average_abs = ifixed::abs(weighted_sum) / ((elapsed_ms + remaining_ms) as u256);
+    if (ifixed::is_neg(weighted_sum)) ifixed::neg(average_abs) else average_abs
 }
 
 public fun is_time_to_update(
@@ -1004,7 +950,7 @@ public fun priority_taker_fee(market_params: &MarketParams): Option<u256> {
 }
 
 public fun resolve_priority_taker_fee(priority_taker_fee: Option<u256>): u256 {
-    assert!(priority_taker_fee.is_some(), priority_gas_price_not_allowed!());
+    assert!(priority_taker_fee.is_some(), EPriorityGasPriceNotAllowed);
     *priority_taker_fee.borrow()
 }
 
@@ -1105,7 +1051,7 @@ public fun base_oracle_price(
 ): u256 {
     assert!(
         oracle.storage_id() == market_params.core_params.base_storage_id,
-        invalid_base_price_feed_storage!(),
+        EInvalidBasePriceFeedStorage,
     );
     let (price, price_timestamp_ms) = oracle
         .price_feed(market_params.core_params.base_source_id)
@@ -1113,7 +1059,7 @@ public fun base_oracle_price(
     let now = clock.timestamp_ms();
     // Stale price: older than the tolerance window (saturating at time zero).
     if (now - now.min(market_params.core_params.base_pfs_tolerance) > price_timestamp_ms) {
-        abort bad_index_price!()
+        abort EBadIndexPrice
     };
     (price as u256)
 }
@@ -1125,14 +1071,14 @@ public fun base_oracle_price_and_twap_price(
 ): (u256, u256) {
     assert!(
         oracle.storage_id() == market_params.core_params.base_storage_id,
-        invalid_base_price_feed_storage!(),
+        EInvalidBasePriceFeedStorage,
     );
     let feed = oracle.price_feed(market_params.core_params.base_source_id);
     let (price, price_timestamp_ms) = feed.price_and_timestamp_ms();
     let twap_price = feed.twap_price();
     let now = clock.timestamp_ms();
     if (now - now.min(market_params.core_params.base_pfs_tolerance) > price_timestamp_ms) {
-        abort bad_index_price!()
+        abort EBadIndexPrice
     };
     ((price as u256), (twap_price as u256))
 }
@@ -1144,14 +1090,14 @@ public fun collateral_oracle_price(
 ): u256 {
     assert!(
         oracle.storage_id() == market_params.core_params.collateral_storage_id,
-        invalid_collateral_price_feed_storage!(),
+        EInvalidCollateralPriceFeedStorage,
     );
     let feed = oracle.price_feed(market_params.core_params.collateral_source_id);
     let (price, price_timestamp_ms) = feed.price_and_timestamp_ms();
     let twap_price = feed.twap_price();
     let now = clock.timestamp_ms();
     if (now - now.min(market_params.core_params.collateral_pfs_tolerance) > price_timestamp_ms) {
-        abort bad_index_price!()
+        abort EBadIndexPrice
     };
     let (price, twap_price) = ((price as u256), (twap_price as u256));
     assert_index_twap_divergence_within_limit(market_params, price, twap_price);
@@ -1210,7 +1156,7 @@ public(package) fun assert_margin_ratios(
         ifixed::less_than_eq(margin_ratio_initial, 1_000_000_000_000_000_000)
             && ifixed::less_than(margin_ratio_maintenance, margin_ratio_initial)
             && ifixed::greater_than(margin_ratio_maintenance, 0),
-        invalid_margin_ratios!(),
+        EInvalidMarginRatios,
     )
 }
 
@@ -1227,13 +1173,13 @@ fun assert_funding_parameters(
             && funding_frequency_ms >= registry_config.min_funding_frequency_ms()
             && funding_period_ms > funding_frequency_ms
             && funding_period_ms % funding_frequency_ms == 0,
-        invalid_funding_parameters!(),
+        EInvalidFundingParameters,
     );
     assert!(
         premium_twap_frequency_ms >= registry_config.min_premium_twap_frequency_ms()
             && premium_twap_period_ms >= registry_config.min_premium_twap_period_ms()
             && premium_twap_period_ms > premium_twap_frequency_ms,
-        invalid_twap_parameters!(),
+        EInvalidTwapParameters,
     )
 }
 
@@ -1246,7 +1192,7 @@ fun assert_spread_twap_parameters(
         spread_twap_frequency_ms >= registry_config.min_spread_twap_frequency_ms()
             && spread_twap_period_ms >= registry_config.min_spread_twap_period_ms()
             && spread_twap_period_ms > spread_twap_frequency_ms,
-        invalid_twap_parameters!(),
+        EInvalidTwapParameters,
     )
 }
 
@@ -1258,7 +1204,7 @@ fun assert_priority_taker_fee(registry_config: &Config, priority_taker_fee: Opti
     assert!(
         ifixed::greater_than_eq(fee, 0)
             && ifixed::less_than_eq(fee, registry_config.max_abs_taker_fee()),
-        invalid_priority_taker_fee!(),
+        EInvalidPriorityTakerFee,
     )
 }
 
@@ -1268,7 +1214,7 @@ fun assert_market_fees(registry_config: &Config, maker_fee: u256, taker_fee: u25
     assert!(
         ifixed::less_than_eq(ifixed::abs(maker_fee), registry_config.max_abs_maker_fee())
             && ifixed::less_than_eq(ifixed::abs(taker_fee), registry_config.max_abs_taker_fee()),
-        invalid_market_fees!(),
+        EInvalidMarketFees,
     );
     assert!(
         !ifixed::is_neg(maker_fee)
@@ -1276,7 +1222,7 @@ fun assert_market_fees(registry_config: &Config, maker_fee: u256, taker_fee: u25
                 !ifixed::is_neg(taker_fee)
                     && ifixed::less_than_eq(ifixed::abs(maker_fee), taker_fee)
             ),
-        negative_maker_fee_not_covered!(),
+        ENegativeMakerFeeNotCovered,
     );
     assert!(
         !ifixed::is_neg(taker_fee)
@@ -1284,7 +1230,7 @@ fun assert_market_fees(registry_config: &Config, maker_fee: u256, taker_fee: u25
                 !ifixed::is_neg(maker_fee)
                     && ifixed::less_than_eq(ifixed::abs(taker_fee), maker_fee)
             ),
-        negative_taker_fee_not_covered!(),
+        ENegativeTakerFeeNotCovered,
     )
 }
 
@@ -1298,7 +1244,7 @@ fun assert_liquidation_fees(
             && ifixed::less_than_eq(liquidation_fee, registry_config.max_liquidation_fee())
             && !ifixed::is_neg(insurance_fund_fee)
             && ifixed::less_than_eq(insurance_fund_fee, registry_config.max_insurance_fund_fee()),
-        invalid_liquidation_fees!(),
+        EInvalidLiquidationFees,
     )
 }
 
@@ -1312,7 +1258,7 @@ public(package) fun assert_liquidation_fees_against_mmr(
             ifixed::add(liquidation_fee, insurance_fund_fee),
             margin_ratio_maintenance,
         ),
-        liquidation_fees_exceed_maintenance_margin_ratio!(),
+        ELiquidationFeesExceedMaintenanceMarginRatio,
     )
 }
 
@@ -1322,6 +1268,6 @@ fun assert_lot_and_tick_sizes(
 ) {
     assert!(
         lot_size > 0 && lot_size <= 1_000_000_000 && tick_size > 0 && tick_size <= 1_000_000_000,
-        invalid_lot_and_tick_sizes!(),
+        EInvalidLotAndTickSizes,
     )
 }

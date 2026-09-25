@@ -22,7 +22,7 @@ use std::u256;
 use fun oracle_aggregator_pyth_integration::source::assert_version as Source.assert_version;
 use fun oracle_aggregator_pyth_integration::source::source_cap as Source.source_cap;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 #[error(code = 0)]
 const EUnsupportedExponent: vector<u8> =

@@ -11,15 +11,15 @@ None of the packages are published yet; every package address is `0x0`.
 
 | Package | Modules | Purpose | Depends on |
 |---|---|---|---|
-| `ifixed` | constants, ifixed, macros | Signed 18-decimal fixed point (two's complement `u256`) | |
+| `ifixed` | ifixed | Signed 18-decimal fixed point (two's complement `u256`) | |
 | `authority_cap` | authority | Role-based authority caps (admin, assistant, ...) with revocation | |
 | `ordered_map` | enum_option, ordered_map | B+tree ordered map that stores the order book | |
 | `af_lp` | af_lp | LP coin type | |
-| `position` | constants, position | Position accounting: fills, funding settlement, bad debt | ifixed |
+| `position` | position | Position accounting: fills, funding settlement, bad debt | ifixed |
 | `vendor` | authority, config, events, init, metadata | Registration and metadata of the vendors that operate markets and price feeds | authority_cap |
 | `oracle_aggregator` | authority, config, events, init, price, price_feed, price_feed_storage, source | Price feed storage; newest, median and TWAP prices across sources | vendor, authority_cap |
 | `oracle_pyth` | init, price_feed_storage, source | Adapter that writes Pyth prices into `oracle_aggregator` feeds | the above, Pyth |
-| `perpetuals` | account, adl, authority, clearing_house, constants, events, init, keys, market, order_id, orderbook, registry, stop_orders, twap_orders | Clearing house, order book, markets, accounts, stop and TWAP orders, liquidation, ADL | vendor, ifixed, authority_cap, position, oracle_aggregator, ordered_map |
+| `perpetuals` | account, adl, authority, clearing_house, events, init, keys, market, orderbook, registry, stop_orders, twap_orders | Clearing house, order book, markets, accounts, stop and TWAP orders, liquidation, ADL | vendor, ifixed, authority_cap, position, oracle_aggregator, ordered_map |
 | `market_making_vault` | authority, config, errors, events, init, interface, keys, metadata, perpetuals_api, vault | LP vaults: deposits, withdrawal requests, trading sessions run by the vault owner | perpetuals and six others |
 
 Publish order: `ifixed`, `authority_cap`, `ordered_map`, `af_lp`, then `position`, `vendor`, then

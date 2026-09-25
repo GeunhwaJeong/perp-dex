@@ -9,7 +9,7 @@ use haneul::transfer::Receiving;
 use std::internal::Permit;
 use std::type_name;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 const EAuthorityCapAlreadyCreated: u64 = 0;
 const EInvalidAuthorityRole: u64 = 1;

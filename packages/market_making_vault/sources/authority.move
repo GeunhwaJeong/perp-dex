@@ -8,7 +8,7 @@ use haneul::address;
 use haneul::types;
 use std::type_name::{Self, TypeName};
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 #[error(code = 0)]
 const EInvalidAuthorityRole: vector<u8> = b"This function only accepts ADMIN or ASSISTANT authority roles.";

@@ -19,19 +19,19 @@ use perpetuals::events;
 use perpetuals::market;
 use perpetuals::registry::Registry;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
-macro fun stop_order_ticket_expired(): u64 { 6200 }
-macro fun stop_order_conditions_violated(): u64 { 6201 }
-macro fun wrong_order_details(): u64 { 6202 }
-macro fun not_enough_gas_for_stop_order(): u64 { 6203 }
-macro fun invalid_executor_for_stop_order(): u64 { 6204 }
-macro fun invalid_stop_order_type(): u64 { 6205 }
-macro fun invalid_position_for_sltp(): u64 { 6206 }
-macro fun invalid_stop_order_trigger_price_type(): u64 { 6207 }
-macro fun wrong_stop_order_type_for_execution(): u64 { 6208 }
-macro fun stop_order_without_economic_activity(): u64 { 6209 }
-macro fun invalid_stop_order_gas_price(): u64 { 6210 }
+const EStopOrderTicketExpired: u64 = 6200;
+const EStopOrderConditionsViolated: u64 = 6201;
+const EWrongOrderDetails: u64 = 6202;
+const ENotEnoughGasForStopOrder: u64 = 6203;
+const EInvalidExecutorForStopOrder: u64 = 6204;
+const EInvalidStopOrderType: u64 = 6205;
+const EInvalidPositionForSltp: u64 = 6206;
+const EInvalidStopOrderTriggerPriceType: u64 = 6207;
+const EWrongStopOrderTypeForExecution: u64 = 6208;
+const EStopOrderWithoutEconomicActivity: u64 = 6209;
+const EInvalidStopOrderGasPrice: u64 = 6210;
 
 // === Types ===
 
@@ -61,8 +61,8 @@ public fun create_stop_order_ticket<T, ADMIN_OR_ASSISTANT>(
     account.assert_authority_cap_is_valid(cap);
     registry.assert_package_version();
     // 0: stop loss / take profit on the current position, 1: standalone stop order.
-    assert!(stop_order_type < 2, invalid_stop_order_type!());
-    assert!(gas.value() >= registry.stop_order_geunhwa_cost(), not_enough_gas_for_stop_order!());
+    assert!(stop_order_type < 2, EInvalidStopOrderType);
+    assert!(gas.value() >= registry.stop_order_geunhwa_cost(), ENotEnoughGasForStopOrder);
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
 
     let account_id = account.account_id();
@@ -76,7 +76,7 @@ public fun create_stop_order_ticket<T, ADMIN_OR_ASSISTANT>(
         stop_order_type,
         encrypted_details,
     };
-    events::e31<T>(
+    events::emit_created_stop_order_ticket<T>(
         ticket.id.to_inner(),
         account_id,
         executors,
@@ -108,7 +108,7 @@ public fun cancel<T, ADMIN_OR_ASSISTANT>(
         stop_order_type: _,
         encrypted_details: _,
     } = account.remove_order_ticket(ticket_id);
-    events::e33<T>(id.to_inner(), account_id, ctx.sender());
+    events::emit_deleted_stop_order_ticket<T>(id.to_inner(), account_id, ctx.sender());
     id.delete();
     coin::from_balance(gas, ctx)
 }
@@ -134,7 +134,7 @@ public fun cancel_stop_order_ticket<T>(
         stop_order_type: _,
         encrypted_details: _,
     } = ticket;
-    events::e33<T>(id.to_inner(), account_id, executor_address);
+    events::emit_deleted_stop_order_ticket<T>(id.to_inner(), account_id, executor_address);
     id.delete();
     coin::from_balance(gas, ctx)
 }
@@ -152,7 +152,7 @@ public fun edit_stop_order_ticket_details<T, ADMIN_OR_ASSISTANT>(
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
     account.borrow_mut_order_ticket<_, StopOrderTicket<T>>(ticket_id).encrypted_details =
         encrypted_details;
-    events::e34<T>(ticket_id, account.account_id(), encrypted_details)
+    events::emit_edited_stop_order_ticket_details<T>(ticket_id, account.account_id(), encrypted_details)
 }
 
 public fun edit_stop_order_ticket_executors<T, ADMIN_OR_ASSISTANT>(
@@ -168,7 +168,7 @@ public fun edit_stop_order_ticket_executors<T, ADMIN_OR_ASSISTANT>(
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
     account.borrow_mut_order_ticket<_, StopOrderTicket<T>>(ticket_id).executors =
         executors;
-    events::e35<T>(ticket_id, account.account_id(), executors)
+    events::emit_edited_stop_order_ticket_executors<T>(ticket_id, account.account_id(), executors)
 }
 
 /// Executes a stop loss / take profit ticket: closes (part of) the account's position once the
@@ -196,7 +196,7 @@ public fun place_stop_order_sltp<T>(
 ): (SessionSummary, Coin<HANEUL>, ClearingHouse<T>) {
     clearing_house.assert_package_version();
     clearing_house.assert_market_is_not_paused();
-    assert!(ctx.gas_price() == ctx.reference_gas_price(), invalid_stop_order_gas_price!());
+    assert!(ctx.gas_price() == ctx.reference_gas_price(), EInvalidStopOrderGasPrice);
 
     let (gas, stop_order_type, encrypted_details) = {
         account.assert_order_ticket_exists(ticket_id);
@@ -212,56 +212,32 @@ public fun place_stop_order_sltp<T>(
             stop_order_type,
             encrypted_details,
         } = ticket;
-        events::e32<T>(id.to_inner(), account_id, executor_address);
+        events::emit_executed_stop_order_ticket<T>(id.to_inner(), account_id, executor_address);
         id.delete();
         (gas, stop_order_type, encrypted_details)
     };
-    assert!(stop_order_type == 0, wrong_stop_order_type_for_execution!());
+    assert!(stop_order_type == 0, EWrongStopOrderTypeForExecution);
     assert_stop_order_trigger_price_type(trigger_price_type);
 
-    // The ticket commits to blake2b256(bcs(order details) || salt). Each field goes through a
-    // `bytes`/`value` binding pair and the salt is copied, mirroring the original append macro so
-    // that the compiled code stays identical to the published bytecode.
+    // The ticket commits to blake2b256(bcs(order details) || salt).
     let mut details = vector[];
-    let bytes = &mut details;
-    let value = object::id(&clearing_house);
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = expire_timestamp;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = is_limit_order;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = trigger_price_type;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = stop_loss_price;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = take_profit_price;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = position_is_ask;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = size;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = price;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = order_type;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = integrator_info;
-    bytes.append(bcs::to_bytes(&value));
-    details.append(*&salt);
-    assert!(hash::blake2b256(&details) == *&encrypted_details, wrong_order_details!());
+    details.append(bcs::to_bytes(&object::id(&clearing_house)));
+    details.append(bcs::to_bytes(&expire_timestamp));
+    details.append(bcs::to_bytes(&is_limit_order));
+    details.append(bcs::to_bytes(&trigger_price_type));
+    details.append(bcs::to_bytes(&stop_loss_price));
+    details.append(bcs::to_bytes(&take_profit_price));
+    details.append(bcs::to_bytes(&position_is_ask));
+    details.append(bcs::to_bytes(&size));
+    details.append(bcs::to_bytes(&price));
+    details.append(bcs::to_bytes(&order_type));
+    details.append(bcs::to_bytes(&integrator_info));
+    details.append(salt);
+    assert!(hash::blake2b256(&details) == encrypted_details, EWrongOrderDetails);
 
     let now = clock.timestamp_ms();
     if (expire_timestamp.is_some()) {
-        assert!(now < *expire_timestamp.borrow(), stop_order_ticket_expired!())
+        assert!(now < *expire_timestamp.borrow(), EStopOrderTicketExpired)
     };
     let (index_price, index_twap_price) = market::base_oracle_price_and_twap_price(
         clearing_house.market_params(),
@@ -287,12 +263,12 @@ public fun place_stop_order_sltp<T>(
         (position_is_ask && ifixed::less_than_eq(trigger_price, *take_profit_price))
             || (!position_is_ask && ifixed::greater_than_eq(trigger_price, *take_profit_price))
     };
-    assert!(stop_loss_triggered || take_profit_triggered, stop_order_conditions_violated!());
+    assert!(stop_loss_triggered || take_profit_triggered, EStopOrderConditionsViolated);
 
     let (position_base, _) = clearing_house.position(account.account_id()).base_and_quote_amounts();
     assert!(
         position_base != 0 && position_is_ask == ifixed::is_neg(position_base),
-        invalid_position_for_sltp!(),
+        EInvalidPositionForSltp,
     );
     // Never close more than the current position.
     let requested_size = size;
@@ -325,7 +301,7 @@ public fun place_stop_order_sltp<T>(
         summary.base_filled_ask() != 0
             || summary.base_filled_bid() != 0
             || summary.posted_orders() != 0,
-        stop_order_without_economic_activity!(),
+        EStopOrderWithoutEconomicActivity,
     );
     let (clearing_house, summary) = session.end_session_(account, false, true, false);
     (summary, coin::from_balance(gas, ctx), clearing_house)
@@ -357,7 +333,7 @@ public fun place_stop_order_standalone<T>(
 ): (SessionSummary, Coin<HANEUL>, ClearingHouse<T>) {
     clearing_house.assert_package_version();
     clearing_house.assert_market_is_not_paused();
-    assert!(ctx.gas_price() == ctx.reference_gas_price(), invalid_stop_order_gas_price!());
+    assert!(ctx.gas_price() == ctx.reference_gas_price(), EInvalidStopOrderGasPrice);
 
     let (gas, stop_order_type, encrypted_details) = {
         account.assert_order_ticket_exists(ticket_id);
@@ -373,59 +349,33 @@ public fun place_stop_order_standalone<T>(
             stop_order_type,
             encrypted_details,
         } = ticket;
-        events::e32<T>(id.to_inner(), account_id, executor_address);
+        events::emit_executed_stop_order_ticket<T>(id.to_inner(), account_id, executor_address);
         id.delete();
         (gas, stop_order_type, encrypted_details)
     };
-    assert!(stop_order_type == 1, wrong_stop_order_type_for_execution!());
+    assert!(stop_order_type == 1, EWrongStopOrderTypeForExecution);
     assert_stop_order_trigger_price_type(trigger_price_type);
 
-    // The ticket commits to blake2b256(bcs(order details) || salt). Each field goes through a
-    // `bytes`/`value` binding pair and the salt is copied, mirroring the original append macro so
-    // that the compiled code stays identical to the published bytecode.
+    // The ticket commits to blake2b256(bcs(order details) || salt).
     let mut details = vector[];
-    let bytes = &mut details;
-    let value = object::id(&clearing_house);
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = expire_timestamp;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = is_limit_order;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = trigger_price_type;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = stop_index_price;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = ge_stop_index_price;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = side;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = size;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = price;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = order_type;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = reduce_only;
-    bytes.append(bcs::to_bytes(&value));
-    let bytes = &mut details;
-    let value = integrator_info;
-    bytes.append(bcs::to_bytes(&value));
-    details.append(*&salt);
-    assert!(hash::blake2b256(&details) == *&encrypted_details, wrong_order_details!());
+    details.append(bcs::to_bytes(&object::id(&clearing_house)));
+    details.append(bcs::to_bytes(&expire_timestamp));
+    details.append(bcs::to_bytes(&is_limit_order));
+    details.append(bcs::to_bytes(&trigger_price_type));
+    details.append(bcs::to_bytes(&stop_index_price));
+    details.append(bcs::to_bytes(&ge_stop_index_price));
+    details.append(bcs::to_bytes(&side));
+    details.append(bcs::to_bytes(&size));
+    details.append(bcs::to_bytes(&price));
+    details.append(bcs::to_bytes(&order_type));
+    details.append(bcs::to_bytes(&reduce_only));
+    details.append(bcs::to_bytes(&integrator_info));
+    details.append(salt);
+    assert!(hash::blake2b256(&details) == encrypted_details, EWrongOrderDetails);
 
     let now = clock.timestamp_ms();
     if (expire_timestamp.is_some()) {
-        assert!(now < *expire_timestamp.borrow(), stop_order_ticket_expired!())
+        assert!(now < *expire_timestamp.borrow(), EStopOrderTicketExpired)
     };
     let (index_price, index_twap_price) = market::base_oracle_price_and_twap_price(
         clearing_house.market_params(),
@@ -442,7 +392,7 @@ public fun place_stop_order_standalone<T>(
     assert!(
         (ge_stop_index_price && ifixed::greater_than_eq(trigger_price, stop_index_price))
             || (!ge_stop_index_price && ifixed::less_than_eq(trigger_price, stop_index_price)),
-        stop_order_conditions_violated!(),
+        EStopOrderConditionsViolated,
     );
 
     let mut session = clearing_house.start_session_(
@@ -471,7 +421,7 @@ public fun place_stop_order_standalone<T>(
         summary.base_filled_ask() != 0
             || summary.base_filled_bid() != 0
             || summary.posted_orders() != 0,
-        stop_order_without_economic_activity!(),
+        EStopOrderWithoutEconomicActivity,
     );
     let (clearing_house, summary) = session.end_session_(account, !reduce_only, true, false);
     (summary, coin::from_balance(gas, ctx), clearing_house)
@@ -509,15 +459,15 @@ fun derive_stop_order_trigger_price<T>(
 }
 
 fun assert_stop_order_trigger_price_type(trigger_price_type: u8) {
-    assert!(trigger_price_type < 3, invalid_stop_order_trigger_price_type!())
+    assert!(trigger_price_type < 3, EInvalidStopOrderTriggerPriceType)
 }
 
 fun assert_valid_ticket_executor<T>(ticket: &StopOrderTicket<T>, executor: &Executor) {
     let executors = &ticket.executors;
     let executor_address = executor.executor_sender();
-    assert!(executors.contains(&executor_address), invalid_executor_for_stop_order!());
+    assert!(executors.contains(&executor_address), EInvalidExecutorForStopOrder);
     assert!(
         ticket.execution_domain == executor.executor_domain(),
-        invalid_executor_for_stop_order!(),
+        EInvalidExecutorForStopOrder,
     )
 }

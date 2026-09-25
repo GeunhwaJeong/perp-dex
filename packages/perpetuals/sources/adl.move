@@ -13,13 +13,13 @@ use perpetuals::events;
 use perpetuals::market;
 use perpetuals::registry::Registry;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
-macro fun size_not_multiple_of_lot_size(): u64 { 6000 }
-macro fun adl_counterparties_mismatch(): u64 { 6001 }
-macro fun adl_counterparty_insufficient(): u64 { 6002 }
-macro fun adl_bad_debt_position_not_closed(): u64 { 6003 }
-macro fun adl_weights_do_not_sum_to_one(): u64 { 6004 }
+const ESizeNotMultipleOfLotSize: u64 = 6000;
+const EAdlCounterpartiesMismatch: u64 = 6001;
+const EAdlCounterpartyInsufficient: u64 = 6002;
+const EAdlBadDebtPositionNotClosed: u64 = 6003;
+const EAdlWeightsDoNotSumToOne: u64 = 6004;
 
 // === Functions ===
 
@@ -119,8 +119,8 @@ fun execute_adl_<T>(
     collateral_price: u256,
 ) {
     let num_counterparties = counterparty_account_ids.length();
-    assert!(num_counterparties == sizes_reduced.length(), adl_counterparties_mismatch!());
-    assert!(num_counterparties == collateral_distribution.length(), adl_counterparties_mismatch!());
+    assert!(num_counterparties == sizes_reduced.length(), EAdlCounterpartiesMismatch);
+    assert!(num_counterparties == collateral_distribution.length(), EAdlCounterpartiesMismatch);
 
     let ch_id = object::id(clearing_house);
     let (market_params, market_state) = clearing_house.market_objects();
@@ -145,41 +145,39 @@ fun execute_adl_<T>(
     if (ifixed::greater_than(equity, 0)) {
         return
     };
-    assert!(num_counterparties > 0, adl_counterparties_mismatch!());
+    assert!(num_counterparties > 0, EAdlCounterpartiesMismatch);
 
     // Cancel the account's resting orders so that its position can be closed completely.
-    let orderbook = clearing_house.borrow_mut_orderbook();
     let (canceled_ask_size, canceled_bid_size, canceled_orders) = if (
         bad_debt_open_orders.length() != 0
     ) {
-        let orderbook = orderbook;
-        let account_id = bad_debt_account_id;
-        let order_ids = &bad_debt_open_orders;
-        let ch_id = ch_id;
-        clearing_house::force_cancel_orders(orderbook, account_id, order_ids, ch_id, 2)
+        // Cancelation reason 2: ADL.
+        clearing_house::force_cancel_orders(
+            clearing_house.borrow_mut_orderbook(),
+            bad_debt_account_id,
+            &bad_debt_open_orders,
+            ch_id,
+            2,
+        )
     } else {
         (0, 0, 0)
     };
     let bad_debt_position = clearing_house.borrow_mut_position(bad_debt_account_id);
-    // The named blocks stand in for the original macro calls; they keep the compiled control flow
-    // identical to the published bytecode.
-    'asks: {
-        let position = bad_debt_position;
-        let size = canceled_ask_size;
-        position.sub_from_pending_amount(true, ifixed::from_u128balance(size, 1_000_000_000));
-    };
-    'bids: {
-        let position = bad_debt_position;
-        let size = canceled_bid_size;
-        position.sub_from_pending_amount(false, ifixed::from_u128balance(size, 1_000_000_000));
-    };
+    bad_debt_position.sub_from_pending_amount(
+        true,
+        ifixed::from_u128balance(canceled_ask_size, 1_000_000_000),
+    );
+    bad_debt_position.sub_from_pending_amount(
+        false,
+        ifixed::from_u128balance(canceled_bid_size, 1_000_000_000),
+    );
     bad_debt_position.update_pending_orders(false, canceled_orders);
     let (pending_ask_size, pending_bid_size) = bad_debt_position.pending_base_amounts_by_side();
     assert!(
         pending_ask_size == 0
             && pending_bid_size == 0
             && bad_debt_position.pending_order_count() == 0,
-        adl_bad_debt_position_not_closed!(),
+        EAdlBadDebtPositionNotClosed,
     );
 
     // Close the bad-debt position at the mark price.
@@ -197,7 +195,7 @@ fun execute_adl_<T>(
     let quote;
     (base, quote) = bad_debt_position.base_and_quote_amounts();
     let _ = bad_debt_position.add_to_collateral_usd(pnl, collateral_price);
-    assert!(base == 0 && quote == 0, adl_bad_debt_position_not_closed!());
+    assert!(base == 0 && quote == 0, EAdlBadDebtPositionNotClosed);
     let bad_debt_collateral = bad_debt_position.collateral();
     let mut remaining_collateral = bad_debt_collateral;
     let _ = bad_debt_position.reset_collateral();
@@ -222,7 +220,7 @@ fun execute_adl_<T>(
         );
         (base, _) = position.base_and_quote_amounts();
         let size_reduced = sizes_reduced[i];
-        assert!(size_reduced % lot_size == 0, size_not_multiple_of_lot_size!());
+        assert!(size_reduced % lot_size == 0, ESizeNotMultipleOfLotSize);
         // The counterparty must hold at least `size_reduced` on the opposite side.
         assert!(
             (was_flat || position.is_long_or_flat() != is_long)
@@ -230,7 +228,7 @@ fun execute_adl_<T>(
                     ifixed::from_balance(size_reduced, 1_000_000_000),
                     ifixed::abs(base),
                 ),
-            adl_counterparty_insufficient!(),
+            EAdlCounterpartyInsufficient,
         );
         total_size_reduced = total_size_reduced + (size_reduced as u128);
 
@@ -247,7 +245,7 @@ fun execute_adl_<T>(
         };
         position.add_to_collateral(collateral_share);
         remaining_collateral = ifixed::sub(remaining_collateral, collateral_share);
-        events::e25(
+        events::emit_performed_adl(
             ch_id,
             bad_debt_account_id,
             size_reduced,
@@ -261,8 +259,8 @@ fun execute_adl_<T>(
         };
         i = i - 1;
     };
-    assert!(total_size_reduced == size_b9, adl_bad_debt_position_not_closed!());
-    assert!(total_weight == 1_000_000_000_000_000_000, adl_weights_do_not_sum_to_one!());
+    assert!(total_size_reduced == size_b9, EAdlBadDebtPositionNotClosed);
+    assert!(total_weight == 1_000_000_000_000_000_000, EAdlWeightsDoNotSumToOne);
 
     // The closed size leaves the market on both sides.
     if (total_size_reduced != 0) {

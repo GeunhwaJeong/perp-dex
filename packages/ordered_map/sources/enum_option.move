@@ -5,7 +5,7 @@ module ordered_map::enum_option;
 
 use std::option;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 #[error(code = 0x40)]
 const EOptionIsSet: vector<u8> = b"The `Option` is `Some` while it should be `None`";

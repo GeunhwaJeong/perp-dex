@@ -7,7 +7,7 @@ module af_lp::af_lp;
 use haneul::coin;
 use haneul::url;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 const SYMBOL: vector<u8> = b"afLP";
 const NAME: vector<u8> = b"afLP";

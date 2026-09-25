@@ -3,7 +3,7 @@
 
 module market_making_vault::errors;
 
-// === Errors and constants (original names from the published interface) ===
+// === Errors and constants ===
 
 const ESlippageCheck: u64 = 1;
 const ENotEnoughCollateralBalance: u64 = 2;
