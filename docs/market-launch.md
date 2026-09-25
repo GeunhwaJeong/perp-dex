@@ -89,6 +89,23 @@ Liquidations add the insurance fee share of every liquidated notional to it.
 | Stale order sweeper (optional) | `try_cancel_stale_orders` with the maintenance cap | Expired and no-longer-reducing reduce-only orders |
 | Stop and TWAP executors | `stop_orders::place_stop_order_*`, `twap_orders::execute` | Conditional orders are executed by whoever the ticket names |
 
+Two calculations the operators must get right:
+
+- **TWAP executor.** An unfilled remainder of an earlier chunk is only retried when the
+  `amount` passed to `execute` is smaller than the chunk, since the retry fills the gap up to
+  the per-run maximum. With `amount_uncertainty_bps` at zero the amount must equal the chunk
+  exactly and nothing is ever retried; give orders a non-zero uncertainty and, once
+  `unfilled_scheduled_amount` is positive, pass a reduced amount (down to zero) to retry it.
+- **Force-withdraw executor.** `size_to_close` frees the withdrawer's share of that market's
+  margin only, not of the whole vault; the rest is paid from the vault's idle collateral at
+  settlement. Compute the share of the market margin (`lp / lp_supply` times the position's
+  margin at the mark), then the smallest lot-rounded close that leaves the remaining position
+  at the target margin ratio after that share is deallocated. Too little aborts with
+  `EForceWithdrawBelowMarginRatio` (9), too much with
+  `EForceWithdrawAboveMarginRatioTolerance` (13), and a share too small to justify a full close
+  with `EForceWithdrawCollateralLeftover` (47). Positions worth $5 or less are always closed
+  in full.
+
 ## 7. Opening checklist
 
 - Both feeds fresh, TWAP window set (`set_twap_period_ms`).
