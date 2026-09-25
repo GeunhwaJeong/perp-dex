@@ -126,6 +126,9 @@ public fun cap(fx: &Fx, who: u64): &AuthorityCap<ACCOUNT, ADMIN> { &fx.accounts[
 public fun deposits(): vector<u64> { vector[1_000_000, 100_000, 200_000] }
 public fun allocations(): vector<u64> { vector[500_000, 20_000, 100_000] }
 
+// `coin::create_currency` is the pre-registry path, kept because it yields the CoinMetadata
+// that `create_clearing_house` reads the decimals from.
+#[allow(deprecated_usage)]
 public fun setup(): (Scenario, Fx) {
     let admin = @0xAD;
     let mut sc = ts::begin(admin);
