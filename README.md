@@ -47,13 +47,14 @@ Every package builds without warnings.
 
 ## Unit tests
 
-Four packages carry Move unit tests under their `tests/` directories, 216 in total:
+Five packages carry Move unit tests under their `tests/` directories, 230 in total:
 
 | Package | Tests | What is checked |
 |---|---|---|
 | `ifixed` | 32 | Every arithmetic variant against a sign-and-magnitude reference, on edge values and pseudo-random operands, including rounding directions and overflow aborts |
 | `ordered_map` | 21 | The B+ tree against a sorted vector under insert, remove, try-remove, clear and batch-drop sequences with the smallest node parameters |
 | `position` | 34 | Fills on both sides with their rounding, taker settlement, funding, free collateral, maker fill restoration, margin requirement checks, bankruptcy price |
+| `oracle_pyth` | 14 | Exponent scaling of Pyth prices to 18 decimals, feed creation from a Pyth price object with its millisecond timestamp, the feed's binding to that object, source authorization and versioning, feed administration |
 | `perpetuals` | 129 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization and ADL (13); pausing, close and settlement, treasury, proposals, freezing (17); stop loss / take profit and standalone stop tickets (23); TWAP tickets (20) |
 
 The perpetuals tests run on a `test_scenario` fixture (`tests/test_support.move`) that stands up
@@ -102,8 +103,8 @@ In total 28 of the checks are actions that must be rejected with a specific abor
 step the script also checks that each market's collateral equals the sum of position equity at entry
 prices plus accrued fees.
 
-Not covered yet: the Pyth adapter (Pyth and Wormhole are not on a fresh localnet) and the vault's
-forced-withdrawal path. Stop and TWAP orders are covered by unit tests.
+Not covered yet: the vault's forced-withdrawal path. Stop and TWAP orders and the Pyth adapter are
+covered by unit tests (Pyth and Wormhole are not on a fresh localnet).
 
 ## Operational notes
 
@@ -122,8 +123,9 @@ See `docs/market-launch.md` for the launch order and the operators a market depe
 
 ## Status
 
-The packages are not published. Unit tests cover `ifixed`, `ordered_map`, `position` and
-`perpetuals`; the oracle, vendor and vault packages are only exercised by the localnet suite.
+The packages are not published. Unit tests cover `ifixed`, `ordered_map`, `position`,
+`perpetuals` and `oracle_pyth`; the aggregator, vendor and vault packages are only exercised by the
+localnet suite.
 
 ## License
 
