@@ -1,0 +1,16 @@
+[package]
+name = "perpetuals"
+edition = "2024"
+
+[dependencies]
+Haneul = { local = "../../deps/haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../deps/haneul-src/crates/haneul-framework/packages/move-stdlib" }
+vendor = { local = "../vendor" }
+ifixed = { local = "../ifixed" }
+authority_cap = { local = "../authority_cap" }
+position = { local = "../position" }
+oracle_aggregator = { local = "../oracle_aggregator" }
+ordered_map = { local = "../ordered_map" }
+
+[addresses]
+perpetuals = "0x0"

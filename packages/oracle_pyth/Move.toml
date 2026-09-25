@@ -1,0 +1,14 @@
+[package]
+name = "oracle_pyth"
+edition = "2024"
+
+[dependencies]
+Haneul = { local = "../../deps/haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../deps/haneul-src/crates/haneul-framework/packages/move-stdlib" }
+vendor = { local = "../vendor" }
+authority_cap = { local = "../authority_cap" }
+oracle_aggregator = { local = "../oracle_aggregator" }
+pyth = { local = "../../deps/haneul-oracle/pyth" }
+
+[addresses]
+oracle_aggregator_pyth_integration = "0x0"

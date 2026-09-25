@@ -1,0 +1,11 @@
+[package]
+name = "position"
+edition = "2024"
+
+[dependencies]
+Haneul = { local = "../../deps/haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../deps/haneul-src/crates/haneul-framework/packages/move-stdlib" }
+ifixed = { local = "../ifixed" }
+
+[addresses]
+position = "0x0"

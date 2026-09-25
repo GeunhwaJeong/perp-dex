@@ -1,0 +1,10 @@
+[package]
+name = "ordered_map"
+edition = "2024"
+
+[dependencies]
+Haneul = { local = "../../deps/haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../deps/haneul-src/crates/haneul-framework/packages/move-stdlib" }
+
+[addresses]
+ordered_map = "0x0"

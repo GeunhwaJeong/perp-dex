@@ -1,0 +1,10 @@
+[package]
+name = "authority_cap"
+edition = "2024"
+
+[dependencies]
+Haneul = { local = "../../deps/haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../deps/haneul-src/crates/haneul-framework/packages/move-stdlib" }
+
+[addresses]
+authority_cap = "0x0"

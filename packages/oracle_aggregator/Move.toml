@@ -1,0 +1,12 @@
+[package]
+name = "oracle_aggregator"
+edition = "2024"
+
+[dependencies]
+Haneul = { local = "../../deps/haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../deps/haneul-src/crates/haneul-framework/packages/move-stdlib" }
+vendor = { local = "../vendor" }
+authority_cap = { local = "../authority_cap" }
+
+[addresses]
+oracle_aggregator = "0x0"

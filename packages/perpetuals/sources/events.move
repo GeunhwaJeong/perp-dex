@@ -1,0 +1,1128 @@
+// Copyright (c) Aftermath Technologies, Inc.
+// SPDX-License-Identifier: BUSL-1.1
+
+module perpetuals::events;
+
+use haneul::event;
+use std::string::String;
+use std::type_name::TypeName;
+
+// === Types ===
+
+public struct UpgradedVersion has copy, drop { id: ID, version: u64 }
+
+public struct CreatedAccount<phantom T> has copy, drop {
+    account_obj_id: ID,
+    user: address,
+    account_id: u64,
+}
+
+public struct DepositedCollateral<phantom T> has copy, drop { account_id: u64, collateral: u64 }
+
+public struct AllocatedCollateral has copy, drop { ch_id: ID, account_id: u64, collateral: u64 }
+
+public struct WithdrewCollateral<phantom T> has copy, drop { account_id: u64, collateral: u64 }
+
+public struct RegisteredCollateralInfo<phantom T> has copy, drop {
+    storage_id: u32,
+    source_id: u16,
+    scaling_factor: u256,
+}
+
+public struct DeallocatedCollateral has copy, drop { ch_id: ID, account_id: u64, collateral: u64 }
+
+public struct CreatedClearingHouse has copy, drop {
+    ch_id: ID,
+    collateral: String,
+    coin_decimals: u64,
+    margin_ratio_initial: u256,
+    margin_ratio_maintenance: u256,
+    base_storage_id: u32,
+    base_source_id: u16,
+    collateral_storage_id: u32,
+    collateral_source_id: u16,
+    funding_frequency_ms: u64,
+    funding_period_ms: u64,
+    premium_twap_frequency_ms: u64,
+    premium_twap_period_ms: u64,
+    spread_twap_frequency_ms: u64,
+    spread_twap_period_ms: u64,
+    maker_fee: u256,
+    taker_fee: u256,
+    liquidation_fee: u256,
+    insurance_fund_fee: u256,
+    lot_size: u64,
+    tick_size: u64,
+}
+
+public struct ClosedMarket has copy, drop { ch_id: ID }
+
+public struct UpdatedSettlementPrices has copy, drop {
+    ch_id: ID,
+    base_settlement_price: u256,
+    collateral_settlement_price: u256,
+    settlement_enabled: bool,
+}
+
+public struct UpdatedIntegratorAddress has copy, drop {
+    integrator_id: u32,
+    previous_integrator_address: address,
+    new_integrator_address: address,
+}
+
+public struct UpdatedPremiumTwap has copy, drop {
+    ch_id: ID,
+    actual_book_price: u256,
+    clipped_book_price: u256,
+    index_price: u256,
+    premium_twap: u256,
+    premium_twap_last_upd_ms: u64,
+}
+
+public struct UpdatedSpreadTwap has copy, drop {
+    ch_id: ID,
+    actual_book_price: u256,
+    clipped_book_price: u256,
+    index_price: u256,
+    spread_twap: u256,
+    spread_twap_last_upd_ms: u64,
+}
+
+public struct UpdatedFunding has copy, drop {
+    ch_id: ID,
+    cum_funding_rate_long: u256,
+    cum_funding_rate_short: u256,
+    funding_last_upd_ms: u64,
+}
+
+public struct SettledFunding has copy, drop {
+    ch_id: ID,
+    account_id: u64,
+    collateral_change_usd: u256,
+    collateral_after: u256,
+    mkt_funding_rate_long: u256,
+    mkt_funding_rate_short: u256,
+}
+
+public struct SetPositionInitialMarginRatio has copy, drop {
+    ch_id: ID,
+    account_id: u64,
+    initial_margin_ratio: u256,
+}
+
+public struct FilledMakerOrders has copy, drop {
+    events: vector<FilledMakerOrder>,
+    book_price: Option<u64>,
+}
+
+public struct FilledMakerOrder has copy, drop {
+    ch_id: ID,
+    maker_account_id: u64,
+    taker_account_id: u64,
+    order_id: u128,
+    client_order_id: Option<u64>,
+    filled_size: u64,
+    remaining_size: u64,
+    canceled_size: u64,
+    cancelation_reason: Option<u8>,
+    pnl: u256,
+    maker_fees: u256,
+    mark_price: u256,
+    integrator_id: Option<u32>,
+    integrator_fee_paid_usd: u256,
+}
+
+public struct FilledTakerOrder has copy, drop {
+    ch_id: ID,
+    taker_account_id: u64,
+    taker_pnl: u256,
+    taker_fees: u256,
+    integrator_id: Option<u32>,
+    integrator_fee_paid_usd: u256,
+    base_asset_delta_ask: u256,
+    quote_asset_delta_ask: u256,
+    base_asset_delta_bid: u256,
+    quote_asset_delta_bid: u256,
+    mark_price: u256,
+}
+
+public struct ClosedPositionAtSettlementPrices has copy, drop {
+    ch_id: ID,
+    account_id: u64,
+    pnl: u256,
+    base_asset_amount: u256,
+    quote_asset_amount: u256,
+    deallocated_collateral: u64,
+    bad_debt: u256,
+}
+
+public struct PostedOrder has copy, drop {
+    ch_id: ID,
+    account_id: u64,
+    order_id: u128,
+    client_order_id: Option<u64>,
+    order_size: u64,
+    reduce_only: bool,
+    expiration_timestamp_ms: Option<u64>,
+    integrator_id: Option<u32>,
+    integrator_fee_rate: u32,
+    mark_price: u256,
+    book_price: Option<u64>,
+}
+
+public struct CanceledOrder has copy, drop {
+    ch_id: ID,
+    account_id: u64,
+    size: u64,
+    order_id: u128,
+    client_order_id: Option<u64>,
+    cancelation_reason: u8,
+    book_price: Option<u64>,
+}
+
+public struct LiquidatedPosition has copy, drop {
+    ch_id: ID,
+    liqee_account_id: u64,
+    liqor_account_id: u64,
+    is_liqee_long: bool,
+    base_liquidated: u256,
+    quote_liquidated: u256,
+    liqee_pnl: u256,
+    liquidation_fees: u256,
+    insurance_fund_fees: u256,
+    bad_debt: u256,
+    mark_price: u256,
+}
+
+public struct PerformedLiquidation has copy, drop {
+    ch_id: ID,
+    liqee_account_id: u64,
+    liqor_account_id: u64,
+    is_liqee_long: bool,
+    base_liquidated: u256,
+    quote_liquidated: u256,
+    liqor_pnl: u256,
+    liqor_fees: u256,
+    mark_price: u256,
+}
+
+public struct PerformedADL has copy, drop {
+    ch_id: ID,
+    bad_debt_account_id: u64,
+    size_reduced: u64,
+    collateral_transferred: u256,
+    adl_price: u64,
+    counterparty_account_id: u64,
+    bad_debt_is_long: bool,
+}
+
+public struct SocializedBadDebt has copy, drop {
+    ch_id: ID,
+    bad_debt_usd: u256,
+    socialized_fundings: u256,
+    added_to_long: bool,
+    cum_funding_rate_long: u256,
+    cum_funding_rate_short: u256,
+}
+
+public struct CreatedPosition has copy, drop {
+    ch_id: ID,
+    account_id: u64,
+    mkt_funding_rate_long: u256,
+    mkt_funding_rate_short: u256,
+}
+
+public struct CreatedStopOrderTicket<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    executors: vector<address>,
+    execution_domain: Option<address>,
+    gas: u64,
+    stop_order_type: u64,
+    encrypted_details: vector<u8>,
+}
+
+public struct ExecutedStopOrderTicket<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    executor: address,
+}
+
+public struct DeletedStopOrderTicket<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    executor: address,
+}
+
+public struct EditedStopOrderTicketDetails<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    encrypted_details: vector<u8>,
+}
+
+public struct EditedStopOrderTicketExecutors<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    executors: vector<address>,
+}
+
+public struct CreatedTWAPOrderTicket<phantom T> has copy, drop {
+    ticket_id: ID,
+    ch_id: ID,
+    account_id: u64,
+    executors: vector<address>,
+    execution_domain: Option<address>,
+    gas: u64,
+    encrypted_details: vector<u8>,
+}
+
+public struct ProcessedTWAPOrderTicket<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    execution_amount: u64,
+    filled_amount: u64,
+    remainder: u64,
+    processed_amount: u64,
+    scheduled_amount: u64,
+    last_attempt_timestamp_ms: u64,
+    retry_anchor_timestamp_ms: u64,
+    last_execution_timestamp_ms: u64,
+}
+
+public struct FinalizedTWAPOrderTicket<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    executor: address,
+    deallocated_collateral: u64,
+}
+
+public struct CanceledTWAPOrderTicket<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    sender: address,
+    deallocated_collateral: u64,
+    partial_fill: bool,
+}
+
+public struct DeletedTWAPOrderTicket<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    executor: address,
+}
+
+public struct EditedTWAPOrderTicketDetails<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    encrypted_details: vector<u8>,
+}
+
+public struct EditedTWAPOrderTicketExecutors<phantom T> has copy, drop {
+    ticket_id: ID,
+    account_id: u64,
+    executors: vector<address>,
+}
+
+public struct UpdatedMarginRatios has copy, drop {
+    ch_id: ID,
+    margin_ratio_initial: u256,
+    margin_ratio_maintenance: u256,
+}
+
+public struct SetFeeParams has copy, drop {
+    ch_id: ID,
+    maker_fee: u256,
+    taker_fee: u256,
+    liquidation_fee: u256,
+    insurance_fund_fee: u256,
+    priority_taker_fee: Option<u256>,
+}
+
+public struct SetTwapParams has copy, drop {
+    ch_id: ID,
+    funding_frequency_ms: u64,
+    funding_period_ms: u64,
+    premium_twap_frequency_ms: u64,
+    premium_twap_period_ms: u64,
+    spread_twap_frequency_ms: u64,
+    spread_twap_period_ms: u64,
+}
+
+public struct SetCoreParams has copy, drop {
+    ch_id: ID,
+    lot_size: u64,
+    tick_size: u64,
+    collateral_haircut: u256,
+}
+
+public struct SetBaseOracleParams has copy, drop {
+    ch_id: ID,
+    storage_id: u32,
+    source_id: u16,
+    pfs_tolerance: u64,
+}
+
+public struct SetCollateralOracleParams has copy, drop {
+    ch_id: ID,
+    storage_id: u32,
+    source_id: u16,
+    pfs_tolerance: u64,
+}
+
+public struct SetRiskLimitParams has copy, drop {
+    ch_id: ID,
+    min_order_usd_value: u256,
+    max_pending_orders: u64,
+    max_open_interest: u256,
+    max_open_interest_threshold: u256,
+    max_open_interest_position_percent: u256,
+    max_book_index_spread: u256,
+    max_index_twap_divergence: u256,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+}
+
+public struct DonatedToInsuranceFund has copy, drop {
+    sender: address,
+    ch_id: ID,
+    amount: u64,
+    new_balance: u64,
+}
+
+public struct WithdrewFees has copy, drop {
+    sender: address,
+    ch_id: ID,
+    amount: u64,
+    vault_balance_after: u64,
+}
+
+public struct WithdrewInsuranceFund has copy, drop {
+    sender: address,
+    ch_id: ID,
+    amount: u64,
+    insurance_fund_balance_after: u64,
+}
+
+public struct UpdatedOpenInterestAndFeesAccrued has copy, drop {
+    ch_id: ID,
+    open_interest: u256,
+    fees_accrued: u256,
+}
+
+public struct RegisteredVendor has copy, drop { vendor_key: TypeName, vendor_admin_cap_id: ID }
+
+public struct Froze has copy, drop { id: ID, resume_version: u64, guardian_cap_id: ID }
+
+public struct Unfroze has copy, drop { id: ID, version: u64 }
+
+// === Functions ===
+
+/// Emits `CreatedAccount`.
+public(package) fun e01<T>(account_obj_id: ID, user: address, account_id: u64) {
+    event::emit(CreatedAccount<T> { account_obj_id, user, account_id })
+}
+
+/// Emits `DepositedCollateral`.
+public(package) fun e02<T>(account_id: u64, collateral: u64) {
+    event::emit(DepositedCollateral<T> { account_id, collateral })
+}
+
+/// Emits `AllocatedCollateral`.
+public(package) fun e03(ch_id: ID, account_id: u64, collateral: u64) {
+    event::emit(AllocatedCollateral { ch_id, account_id, collateral })
+}
+
+/// Emits `CreatedClearingHouse`.
+public(package) fun e04(
+    ch_id: ID,
+    collateral: String,
+    coin_decimals: u64,
+    margin_ratio_initial: u256,
+    margin_ratio_maintenance: u256,
+    base_storage_id: u32,
+    base_source_id: u16,
+    collateral_storage_id: u32,
+    collateral_source_id: u16,
+    funding_frequency_ms: u64,
+    funding_period_ms: u64,
+    premium_twap_frequency_ms: u64,
+    premium_twap_period_ms: u64,
+    spread_twap_frequency_ms: u64,
+    spread_twap_period_ms: u64,
+    maker_fee: u256,
+    taker_fee: u256,
+    liquidation_fee: u256,
+    insurance_fund_fee: u256,
+    lot_size: u64,
+    tick_size: u64,
+) {
+    event::emit(CreatedClearingHouse {
+        ch_id,
+        collateral,
+        coin_decimals,
+        margin_ratio_initial,
+        margin_ratio_maintenance,
+        base_storage_id,
+        base_source_id,
+        collateral_storage_id,
+        collateral_source_id,
+        funding_frequency_ms,
+        funding_period_ms,
+        premium_twap_frequency_ms,
+        premium_twap_period_ms,
+        spread_twap_frequency_ms,
+        spread_twap_period_ms,
+        maker_fee,
+        taker_fee,
+        liquidation_fee,
+        insurance_fund_fee,
+        lot_size,
+        tick_size,
+    })
+}
+
+/// Emits `UpgradedVersion`.
+public(package) fun e05(id: ID, version: u64) {
+    event::emit(UpgradedVersion { id, version })
+}
+
+/// Emits `RegisteredVendor`.
+public(package) fun e06(vendor_key: TypeName, vendor_admin_cap_id: ID) {
+    event::emit(RegisteredVendor { vendor_key, vendor_admin_cap_id })
+}
+
+/// Emits `Froze`.
+public(package) fun e07(id: ID, resume_version: u64, guardian_cap_id: ID) {
+    event::emit(Froze { id, resume_version, guardian_cap_id })
+}
+
+/// Emits `Unfroze`.
+public(package) fun e08(id: ID, version: u64) {
+    event::emit(Unfroze { id, version })
+}
+
+/// Emits `ClosedMarket`.
+public(package) fun e09(ch_id: ID) {
+    event::emit(ClosedMarket { ch_id })
+}
+
+/// Emits `UpdatedSettlementPrices`.
+public(package) fun e10(
+    ch_id: ID,
+    base_settlement_price: u256,
+    collateral_settlement_price: u256,
+    settlement_enabled: bool,
+) {
+    event::emit(UpdatedSettlementPrices {
+        ch_id,
+        base_settlement_price,
+        collateral_settlement_price,
+        settlement_enabled,
+    })
+}
+
+/// Emits `UpdatedIntegratorAddress`.
+public(package) fun e11(
+    integrator_id: u32,
+    previous_integrator_address: address,
+    new_integrator_address: address,
+) {
+    event::emit(UpdatedIntegratorAddress {
+        integrator_id,
+        previous_integrator_address,
+        new_integrator_address,
+    })
+}
+
+/// Emits `UpdatedPremiumTwap`.
+public(package) fun e12(
+    ch_id: ID,
+    actual_book_price: u256,
+    clipped_book_price: u256,
+    index_price: u256,
+    premium_twap: u256,
+    premium_twap_last_upd_ms: u64,
+) {
+    event::emit(UpdatedPremiumTwap {
+        ch_id,
+        actual_book_price,
+        clipped_book_price,
+        index_price,
+        premium_twap,
+        premium_twap_last_upd_ms,
+    })
+}
+
+/// Emits `UpdatedSpreadTwap`.
+public(package) fun e13(
+    ch_id: ID,
+    actual_book_price: u256,
+    clipped_book_price: u256,
+    index_price: u256,
+    spread_twap: u256,
+    spread_twap_last_upd_ms: u64,
+) {
+    event::emit(UpdatedSpreadTwap {
+        ch_id,
+        actual_book_price,
+        clipped_book_price,
+        index_price,
+        spread_twap,
+        spread_twap_last_upd_ms,
+    })
+}
+
+/// Emits `UpdatedFunding`.
+public(package) fun e14(
+    ch_id: ID,
+    cum_funding_rate_long: u256,
+    cum_funding_rate_short: u256,
+    funding_last_upd_ms: u64,
+) {
+    event::emit(UpdatedFunding {
+        ch_id,
+        cum_funding_rate_long,
+        cum_funding_rate_short,
+        funding_last_upd_ms,
+    })
+}
+
+/// Emits `SettledFunding`.
+public(package) fun e15(
+    ch_id: ID,
+    account_id: u64,
+    collateral_change_usd: u256,
+    collateral_after: u256,
+    mkt_funding_rate_long: u256,
+    mkt_funding_rate_short: u256,
+) {
+    event::emit(SettledFunding {
+        ch_id,
+        account_id,
+        collateral_change_usd,
+        collateral_after,
+        mkt_funding_rate_long,
+        mkt_funding_rate_short,
+    })
+}
+
+/// Emits `SetPositionInitialMarginRatio`.
+public(package) fun e16(ch_id: ID, account_id: u64, initial_margin_ratio: u256) {
+    event::emit(SetPositionInitialMarginRatio { ch_id, account_id, initial_margin_ratio })
+}
+
+/// Emits `PostedOrder`.
+public(package) fun e17(
+    ch_id: ID,
+    account_id: u64,
+    order_id: u128,
+    client_order_id: Option<u64>,
+    order_size: u64,
+    reduce_only: bool,
+    expiration_timestamp_ms: Option<u64>,
+    integrator_id: Option<u32>,
+    integrator_fee_rate: u32,
+    mark_price: u256,
+    book_price: Option<u64>,
+) {
+    event::emit(PostedOrder {
+        ch_id,
+        account_id,
+        order_id,
+        client_order_id,
+        order_size,
+        reduce_only,
+        expiration_timestamp_ms,
+        integrator_id,
+        integrator_fee_rate,
+        mark_price,
+        book_price,
+    })
+}
+
+/// Emits `FilledMakerOrders`.
+public(package) fun e18(events: vector<FilledMakerOrder>, book_price: Option<u64>) {
+    event::emit(FilledMakerOrders { events, book_price })
+}
+
+/// Builds a `FilledMakerOrder` entry for a `FilledMakerOrders` event.
+public(package) fun e19(
+    ch_id: ID,
+    maker_account_id: u64,
+    taker_account_id: u64,
+    order_id: u128,
+    client_order_id: Option<u64>,
+    filled_size: u64,
+    remaining_size: u64,
+    canceled_size: u64,
+    cancelation_reason: Option<u8>,
+    pnl: u256,
+    maker_fees: u256,
+    mark_price: u256,
+    integrator_id: Option<u32>,
+    integrator_fee_paid_usd: u256,
+): FilledMakerOrder {
+    FilledMakerOrder {
+        ch_id,
+        maker_account_id,
+        taker_account_id,
+        order_id,
+        client_order_id,
+        filled_size,
+        remaining_size,
+        canceled_size,
+        cancelation_reason,
+        pnl,
+        maker_fees,
+        mark_price,
+        integrator_id,
+        integrator_fee_paid_usd,
+    }
+}
+
+/// Emits `FilledTakerOrder`.
+public(package) fun e20(
+    ch_id: ID,
+    taker_account_id: u64,
+    taker_pnl: u256,
+    taker_fees: u256,
+    integrator_id: Option<u32>,
+    integrator_fee_paid_usd: u256,
+    base_asset_delta_ask: u256,
+    quote_asset_delta_ask: u256,
+    base_asset_delta_bid: u256,
+    quote_asset_delta_bid: u256,
+    mark_price: u256,
+) {
+    event::emit(FilledTakerOrder {
+        ch_id,
+        taker_account_id,
+        taker_pnl,
+        taker_fees,
+        integrator_id,
+        integrator_fee_paid_usd,
+        base_asset_delta_ask,
+        quote_asset_delta_ask,
+        base_asset_delta_bid,
+        quote_asset_delta_bid,
+        mark_price,
+    })
+}
+
+/// Emits `ClosedPositionAtSettlementPrices`.
+public(package) fun e21(
+    ch_id: ID,
+    account_id: u64,
+    pnl: u256,
+    base_asset_amount: u256,
+    quote_asset_amount: u256,
+    deallocated_collateral: u64,
+    bad_debt: u256,
+) {
+    event::emit(ClosedPositionAtSettlementPrices {
+        ch_id,
+        account_id,
+        pnl,
+        base_asset_amount,
+        quote_asset_amount,
+        deallocated_collateral,
+        bad_debt,
+    })
+}
+
+/// Emits `CanceledOrder`.
+public(package) fun e22(
+    ch_id: ID,
+    account_id: u64,
+    order_id: u128,
+    client_order_id: Option<u64>,
+    size: u64,
+    cancelation_reason: u8,
+    book_price: Option<u64>,
+) {
+    event::emit(CanceledOrder {
+        ch_id,
+        account_id,
+        order_id,
+        client_order_id,
+        size,
+        cancelation_reason,
+        book_price,
+    })
+}
+
+/// Emits `LiquidatedPosition`.
+public(package) fun e23(
+    ch_id: ID,
+    liqee_account_id: u64,
+    liqor_account_id: u64,
+    is_liqee_long: bool,
+    base_liquidated: u256,
+    quote_liquidated: u256,
+    liqee_pnl: u256,
+    liquidation_fees: u256,
+    insurance_fund_fees: u256,
+    bad_debt: u256,
+    mark_price: u256,
+) {
+    event::emit(LiquidatedPosition {
+        ch_id,
+        liqee_account_id,
+        liqor_account_id,
+        is_liqee_long,
+        base_liquidated,
+        quote_liquidated,
+        liqee_pnl,
+        liquidation_fees,
+        insurance_fund_fees,
+        bad_debt,
+        mark_price,
+    })
+}
+
+/// Emits `PerformedLiquidation`.
+public(package) fun e24(
+    ch_id: ID,
+    liqee_account_id: u64,
+    liqor_account_id: u64,
+    is_liqee_long: bool,
+    base_liquidated: u256,
+    quote_liquidated: u256,
+    liqor_pnl: u256,
+    liqor_fees: u256,
+    mark_price: u256,
+) {
+    event::emit(PerformedLiquidation {
+        ch_id,
+        liqee_account_id,
+        liqor_account_id,
+        is_liqee_long,
+        base_liquidated,
+        quote_liquidated,
+        liqor_pnl,
+        liqor_fees,
+        mark_price,
+    })
+}
+
+/// Emits `PerformedADL`.
+public(package) fun e25(
+    ch_id: ID,
+    bad_debt_account_id: u64,
+    size_reduced: u64,
+    collateral_transferred: u256,
+    adl_price: u64,
+    counterparty_account_id: u64,
+    bad_debt_is_long: bool,
+) {
+    event::emit(PerformedADL {
+        ch_id,
+        bad_debt_account_id,
+        size_reduced,
+        collateral_transferred,
+        adl_price,
+        counterparty_account_id,
+        bad_debt_is_long,
+    })
+}
+
+/// Emits `SocializedBadDebt`.
+public(package) fun e26(
+    ch_id: ID,
+    bad_debt_usd: u256,
+    socialized_fundings: u256,
+    added_to_long: bool,
+    cum_funding_rate_long: u256,
+    cum_funding_rate_short: u256,
+) {
+    event::emit(SocializedBadDebt {
+        ch_id,
+        bad_debt_usd,
+        socialized_fundings,
+        added_to_long,
+        cum_funding_rate_long,
+        cum_funding_rate_short,
+    })
+}
+
+/// Emits `WithdrewCollateral`.
+public(package) fun e27<T>(account_id: u64, collateral: u64) {
+    event::emit(WithdrewCollateral<T> { account_id, collateral })
+}
+
+/// Emits `RegisteredCollateralInfo`.
+public(package) fun e28<T>(storage_id: u32, source_id: u16, scaling_factor: u256) {
+    event::emit(RegisteredCollateralInfo<T> { storage_id, source_id, scaling_factor })
+}
+
+/// Emits `DeallocatedCollateral`.
+public(package) fun e29(ch_id: ID, account_id: u64, collateral: u64) {
+    event::emit(DeallocatedCollateral { ch_id, account_id, collateral })
+}
+
+/// Emits `CreatedPosition`.
+public(package) fun e30(
+    ch_id: ID,
+    account_id: u64,
+    mkt_funding_rate_long: u256,
+    mkt_funding_rate_short: u256,
+) {
+    event::emit(CreatedPosition {
+        ch_id,
+        account_id,
+        mkt_funding_rate_long,
+        mkt_funding_rate_short,
+    })
+}
+
+/// Emits `CreatedStopOrderTicket`.
+public(package) fun e31<T>(
+    ticket_id: ID,
+    account_id: u64,
+    executors: vector<address>,
+    execution_domain: Option<address>,
+    gas: u64,
+    stop_order_type: u64,
+    encrypted_details: vector<u8>,
+) {
+    event::emit(CreatedStopOrderTicket<T> {
+        ticket_id,
+        account_id,
+        executors,
+        execution_domain,
+        gas,
+        stop_order_type,
+        encrypted_details,
+    })
+}
+
+/// Emits `ExecutedStopOrderTicket`.
+public(package) fun e32<T>(ticket_id: ID, account_id: u64, executor: address) {
+    event::emit(ExecutedStopOrderTicket<T> { ticket_id, account_id, executor })
+}
+
+/// Emits `DeletedStopOrderTicket`.
+public(package) fun e33<T>(ticket_id: ID, account_id: u64, executor: address) {
+    event::emit(DeletedStopOrderTicket<T> { ticket_id, account_id, executor })
+}
+
+/// Emits `EditedStopOrderTicketDetails`.
+public(package) fun e34<T>(ticket_id: ID, account_id: u64, encrypted_details: vector<u8>) {
+    event::emit(EditedStopOrderTicketDetails<T> { ticket_id, account_id, encrypted_details })
+}
+
+/// Emits `EditedStopOrderTicketExecutors`.
+public(package) fun e35<T>(ticket_id: ID, account_id: u64, executors: vector<address>) {
+    event::emit(EditedStopOrderTicketExecutors<T> { ticket_id, account_id, executors })
+}
+
+/// Emits `CreatedTWAPOrderTicket`.
+public(package) fun e36<T>(
+    ticket_id: ID,
+    ch_id: ID,
+    account_id: u64,
+    executors: vector<address>,
+    execution_domain: Option<address>,
+    gas: u64,
+    encrypted_details: vector<u8>,
+) {
+    event::emit(CreatedTWAPOrderTicket<T> {
+        ticket_id,
+        ch_id,
+        account_id,
+        executors,
+        execution_domain,
+        gas,
+        encrypted_details,
+    })
+}
+
+/// Emits `ProcessedTWAPOrderTicket`.
+public(package) fun e37<T>(
+    ticket_id: ID,
+    account_id: u64,
+    execution_amount: u64,
+    filled_amount: u64,
+    remainder: u64,
+    processed_amount: u64,
+    scheduled_amount: u64,
+    last_attempt_timestamp_ms: u64,
+    retry_anchor_timestamp_ms: u64,
+    last_execution_timestamp_ms: u64,
+) {
+    event::emit(ProcessedTWAPOrderTicket<T> {
+        ticket_id,
+        account_id,
+        execution_amount,
+        filled_amount,
+        remainder,
+        processed_amount,
+        scheduled_amount,
+        last_attempt_timestamp_ms,
+        retry_anchor_timestamp_ms,
+        last_execution_timestamp_ms,
+    })
+}
+
+/// Emits `FinalizedTWAPOrderTicket`.
+public(package) fun e38<T>(
+    ticket_id: ID,
+    account_id: u64,
+    executor: address,
+    deallocated_collateral: u64,
+) {
+    event::emit(FinalizedTWAPOrderTicket<T> {
+        ticket_id,
+        account_id,
+        executor,
+        deallocated_collateral,
+    })
+}
+
+/// Emits `CanceledTWAPOrderTicket`.
+public(package) fun e39<T>(
+    ticket_id: ID,
+    account_id: u64,
+    sender: address,
+    deallocated_collateral: u64,
+    partial_fill: bool,
+) {
+    event::emit(CanceledTWAPOrderTicket<T> {
+        ticket_id,
+        account_id,
+        sender,
+        deallocated_collateral,
+        partial_fill,
+    })
+}
+
+/// Emits `DeletedTWAPOrderTicket`.
+public(package) fun e40<T>(ticket_id: ID, account_id: u64, executor: address) {
+    event::emit(DeletedTWAPOrderTicket<T> { ticket_id, account_id, executor })
+}
+
+/// Emits `EditedTWAPOrderTicketDetails`.
+public(package) fun e41<T>(ticket_id: ID, account_id: u64, encrypted_details: vector<u8>) {
+    event::emit(EditedTWAPOrderTicketDetails<T> { ticket_id, account_id, encrypted_details })
+}
+
+/// Emits `EditedTWAPOrderTicketExecutors`.
+public(package) fun e42<T>(ticket_id: ID, account_id: u64, executors: vector<address>) {
+    event::emit(EditedTWAPOrderTicketExecutors<T> { ticket_id, account_id, executors })
+}
+
+/// Emits `UpdatedMarginRatios`.
+public(package) fun e43(ch_id: ID, margin_ratio_initial: u256, margin_ratio_maintenance: u256) {
+    event::emit(UpdatedMarginRatios { ch_id, margin_ratio_initial, margin_ratio_maintenance })
+}
+
+/// Emits `SetFeeParams`.
+public(package) fun e44(
+    ch_id: ID,
+    maker_fee: u256,
+    taker_fee: u256,
+    liquidation_fee: u256,
+    insurance_fund_fee: u256,
+    priority_taker_fee: Option<u256>,
+) {
+    event::emit(SetFeeParams {
+        ch_id,
+        maker_fee,
+        taker_fee,
+        liquidation_fee,
+        insurance_fund_fee,
+        priority_taker_fee,
+    })
+}
+
+/// Emits `SetTwapParams`.
+public(package) fun e45(
+    ch_id: ID,
+    funding_frequency_ms: u64,
+    funding_period_ms: u64,
+    premium_twap_frequency_ms: u64,
+    premium_twap_period_ms: u64,
+    spread_twap_frequency_ms: u64,
+    spread_twap_period_ms: u64,
+) {
+    event::emit(SetTwapParams {
+        ch_id,
+        funding_frequency_ms,
+        funding_period_ms,
+        premium_twap_frequency_ms,
+        premium_twap_period_ms,
+        spread_twap_frequency_ms,
+        spread_twap_period_ms,
+    })
+}
+
+/// Emits `SetCoreParams`.
+public(package) fun e46(ch_id: ID, lot_size: u64, tick_size: u64, collateral_haircut: u256) {
+    event::emit(SetCoreParams { ch_id, lot_size, tick_size, collateral_haircut })
+}
+
+/// Emits `SetBaseOracleParams`.
+public(package) fun e47(ch_id: ID, storage_id: u32, source_id: u16, pfs_tolerance: u64) {
+    event::emit(SetBaseOracleParams { ch_id, storage_id, source_id, pfs_tolerance })
+}
+
+/// Emits `SetCollateralOracleParams`.
+public(package) fun e48(ch_id: ID, storage_id: u32, source_id: u16, pfs_tolerance: u64) {
+    event::emit(SetCollateralOracleParams { ch_id, storage_id, source_id, pfs_tolerance })
+}
+
+/// Emits `SetRiskLimitParams`.
+public(package) fun e49(
+    ch_id: ID,
+    min_order_usd_value: u256,
+    max_pending_orders: u64,
+    max_open_interest: u256,
+    max_open_interest_threshold: u256,
+    max_open_interest_position_percent: u256,
+    max_book_index_spread: u256,
+    max_index_twap_divergence: u256,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+) {
+    event::emit(SetRiskLimitParams {
+        ch_id,
+        min_order_usd_value,
+        max_pending_orders,
+        max_open_interest,
+        max_open_interest_threshold,
+        max_open_interest_position_percent,
+        max_book_index_spread,
+        max_index_twap_divergence,
+        max_bad_debt,
+        max_socialize_losses_mr_decrease,
+    })
+}
+
+/// Emits `DonatedToInsuranceFund`.
+public(package) fun e50(sender: address, ch_id: ID, amount: u64, new_balance: u64) {
+    event::emit(DonatedToInsuranceFund { sender, ch_id, amount, new_balance })
+}
+
+/// Emits `WithdrewFees`.
+public(package) fun e51(sender: address, ch_id: ID, amount: u64, vault_balance_after: u64) {
+    event::emit(WithdrewFees { sender, ch_id, amount, vault_balance_after })
+}
+
+/// Emits `WithdrewInsuranceFund`.
+public(package) fun e52(
+    sender: address,
+    ch_id: ID,
+    amount: u64,
+    insurance_fund_balance_after: u64,
+) {
+    event::emit(WithdrewInsuranceFund { sender, ch_id, amount, insurance_fund_balance_after })
+}
+
+/// Emits `UpdatedOpenInterestAndFeesAccrued`.
+public(package) fun e53(ch_id: ID, open_interest: u256, fees_accrued: u256) {
+    event::emit(UpdatedOpenInterestAndFeesAccrued { ch_id, open_interest, fees_accrued })
+}
+
+/// Returns the maker fees and integrator fees recorded in a `FilledMakerOrder`.
+public(package) fun e54(event: &FilledMakerOrder): (u256, u256) {
+    (event.maker_fees, event.integrator_fee_paid_usd)
+}
