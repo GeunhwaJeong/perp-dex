@@ -22,6 +22,7 @@ use perpetuals::account::{Self, Account};
 use perpetuals::authority::{ACCOUNT, PACKAGE, VENDOR};
 use perpetuals::clearing_house::{Self as ch, ClearingHouse, SessionHotPotato, SessionSummary};
 use perpetuals::init as perp_init;
+use perpetuals::market;
 use perpetuals::registry::{Self, Registry};
 use perpetuals::tusd::TUSD;
 use vendor::config::{Self as vendor_config, Config as VendorConfig};
@@ -187,13 +188,16 @@ public fun setup(): (Scenario, Fx) {
 
     // The clearing house.
     let orderbook = ch::create_orderbook(&perp_vk, &registry, 2, 4, 4, 2, 3, 4, sc.ctx());
+    // No socialization: bad debt beyond the insurance fund is left to ADL.
+    let mut params = market::new_creation_params(IMR, MMR, LOT, TICK, 0, 0);
+    params.set_fees(MAKER_FEE, TAKER_FEE, LIQ_FEE, IF_FEE);
+    params.set_funding(60_000, 21_600_000);
+    params.set_premium_twap(1_000, 60_000);
+    params.set_spread_twap(1_000, 60_000);
+    params.set_priority_taker_fee(option::some(1_000_000_000_000_000));
     let clearing_house = ch::create_clearing_house<TUSD, VK, ADMIN>(
         orderbook, &perp_vk, &mut registry, &coin_metadata, &clock, &pfs_btc, &pfs_tusd,
-        source_id, source_id, IMR, MMR,
-        60_000, 21_600_000, 1_000, 60_000, 1_000, 60_000,
-        MAKER_FEE, TAKER_FEE, LIQ_FEE, IF_FEE, LOT, TICK,
-        // No socialization: bad debt beyond the insurance fund is left to ADL.
-        0, 0, option::some(1_000_000_000_000_000), sc.ctx(),
+        source_id, source_id, &params, sc.ctx(),
     );
     ch::register_market<VK, ADMIN, TUSD>(&mut registry, &perp_vk, &clearing_house);
     let ch_id = object::id(&clearing_house);

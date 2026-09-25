@@ -38,10 +38,19 @@ feed and 30 s for the collateral by default) or every session aborts with `EBadI
 
 ## 4. Market creation
 
-`clearing_house::create_orderbook` then `clearing_house::create_clearing_house` (or
-`create_clearing_house_with_currency`), `register_market`, `share`.
+`clearing_house::create_orderbook`, then the creation parameters, then
+`clearing_house::create_clearing_house` (or `create_clearing_house_with_currency`),
+`register_market`, `share`.
 
-Parameters that decide how the market behaves under stress, all passed at creation:
+The creation parameters are a builder in the same transaction: `market::new_creation_params`
+takes the six values with no safe default (initial and maintenance margin ratios, lot and tick
+size, `max_bad_debt`, `max_socialize_losses_mr_decrease`), and `set_fees`, `set_funding`,
+`set_premium_twap`, `set_spread_twap` and `set_priority_taker_fee` fill in the rest. Until set,
+fees are zero, funding runs every minute over six hours, both TWAPs sample every second over a
+minute, and the priority taker fee is `none`. Each setter is a separate call, so the order of
+same-typed arguments can no longer be swapped silently.
+
+Parameters that decide how the market behaves under stress:
 
 - **`max_bad_debt` and `max_socialize_losses_mr_decrease`.** When a liquidation leaves bad debt
   that the insurance fund cannot cover, the rest is socialized to the other side of the market
@@ -51,7 +60,7 @@ Parameters that decide how the market behaves under stress, all passed at creati
   with zeros needs a running ADL operator; a market with no ADL operator needs non-zero limits
   and a funded insurance fund.**
 - **`priority_taker_fee`.** The extra taker fee for sessions paying above the reference gas
-  price, or `none` to refuse them.
+  price, or `none` (the default) to refuse them.
 - **Margin ratios, fees, lot and tick size.** Changing margin ratios later takes a one to three
   day proposal (`create_margin_ratios_proposal`, `commit_margin_ratios_proposal`); the rest is
   immediate through `set_fee_params` and `set_core_params`.

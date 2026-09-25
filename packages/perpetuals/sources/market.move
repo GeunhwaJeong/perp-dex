@@ -92,6 +92,32 @@ public struct LimitsParams has copy, drop, store {
     max_socialize_losses_mr_decrease: u256,
 }
 
+/// Everything `create_clearing_house` needs to know about a market, built with
+/// `new_creation_params` (the values without a safe default) and the `set_*` setters.
+///
+/// Defaults until set: no fees, funding every minute over a six hour period, premium and
+/// spread TWAPs sampled every second over a minute, and no priority taker fee (sessions paying
+/// above the reference gas price are refused).
+public struct MarketCreationParams has copy, drop {
+    margin_ratio_initial: u256,
+    margin_ratio_maintenance: u256,
+    lot_size: u64,
+    tick_size: u64,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+    maker_fee: u256,
+    taker_fee: u256,
+    liquidation_fee: u256,
+    insurance_fund_fee: u256,
+    funding_frequency_ms: u64,
+    funding_period_ms: u64,
+    premium_twap_frequency_ms: u64,
+    premium_twap_period_ms: u64,
+    spread_twap_frequency_ms: u64,
+    spread_twap_period_ms: u64,
+    priority_taker_fee: Option<u256>,
+}
+
 public struct MarketState has store {
     cum_funding_rate_long: u256,
     cum_funding_rate_short: u256,
@@ -105,6 +131,69 @@ public struct MarketState has store {
 }
 
 // === Functions ===
+
+/// Starts the creation parameters from the values that have no safe default: the margin
+/// ratios, the lot and tick sizes and the bad debt policy (see `create_market_params`).
+public fun new_creation_params(
+    margin_ratio_initial: u256,
+    margin_ratio_maintenance: u256,
+    lot_size: u64,
+    tick_size: u64,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+): MarketCreationParams {
+    MarketCreationParams {
+        margin_ratio_initial,
+        margin_ratio_maintenance,
+        lot_size,
+        tick_size,
+        max_bad_debt,
+        max_socialize_losses_mr_decrease,
+        maker_fee: 0,
+        taker_fee: 0,
+        liquidation_fee: 0,
+        insurance_fund_fee: 0,
+        funding_frequency_ms: 60_000,
+        funding_period_ms: 21_600_000,
+        premium_twap_frequency_ms: 1_000,
+        premium_twap_period_ms: 60_000,
+        spread_twap_frequency_ms: 1_000,
+        spread_twap_period_ms: 60_000,
+        priority_taker_fee: option::none(),
+    }
+}
+
+public fun set_fees(
+    params: &mut MarketCreationParams,
+    maker_fee: u256,
+    taker_fee: u256,
+    liquidation_fee: u256,
+    insurance_fund_fee: u256,
+) {
+    params.maker_fee = maker_fee;
+    params.taker_fee = taker_fee;
+    params.liquidation_fee = liquidation_fee;
+    params.insurance_fund_fee = insurance_fund_fee;
+}
+
+public fun set_funding(params: &mut MarketCreationParams, frequency_ms: u64, period_ms: u64) {
+    params.funding_frequency_ms = frequency_ms;
+    params.funding_period_ms = period_ms;
+}
+
+public fun set_premium_twap(params: &mut MarketCreationParams, frequency_ms: u64, period_ms: u64) {
+    params.premium_twap_frequency_ms = frequency_ms;
+    params.premium_twap_period_ms = period_ms;
+}
+
+public fun set_spread_twap(params: &mut MarketCreationParams, frequency_ms: u64, period_ms: u64) {
+    params.spread_twap_frequency_ms = frequency_ms;
+    params.spread_twap_period_ms = period_ms;
+}
+
+public fun set_priority_taker_fee(params: &mut MarketCreationParams, fee: Option<u256>) {
+    params.priority_taker_fee = fee;
+}
 
 fun option_u64_or(value: &Option<u64>, fallback: u64): u64 {
     if (value.is_some()) *value.borrow() else fallback
@@ -121,72 +210,44 @@ fun option_u16_or(value: &Option<u16>, fallback: u16): u16 {
 public(package) fun create_market_objects(
     registry_config: &Config,
     clock: &Clock,
-    margin_ratio_initial: u256,
-    margin_ratio_maintenance: u256,
     base_storage_id: u32,
     collateral_storage_id: u32,
     base_source_id: u16,
     collateral_source_id: u16,
-    funding_frequency_ms: u64,
-    funding_period_ms: u64,
-    premium_twap_frequency_ms: u64,
-    premium_twap_period_ms: u64,
-    spread_twap_frequency_ms: u64,
-    spread_twap_period_ms: u64,
-    maker_fee: u256,
-    taker_fee: u256,
-    liquidation_fee: u256,
-    insurance_fund_fee: u256,
-    lot_size: u64,
-    tick_size: u64,
-    max_bad_debt: u256,
-    max_socialize_losses_mr_decrease: u256,
-    priority_taker_fee: Option<u256>,
+    p: &MarketCreationParams,
     scaling_factor: u256,
 ): (MarketParams, MarketState) {
-    assert_margin_ratios(margin_ratio_initial, margin_ratio_maintenance);
+    assert_margin_ratios(p.margin_ratio_initial, p.margin_ratio_maintenance);
     assert_funding_parameters(
         registry_config,
-        funding_frequency_ms,
-        funding_period_ms,
-        premium_twap_frequency_ms,
-        premium_twap_period_ms,
+        p.funding_frequency_ms,
+        p.funding_period_ms,
+        p.premium_twap_frequency_ms,
+        p.premium_twap_period_ms,
     );
-    assert_spread_twap_parameters(registry_config, spread_twap_frequency_ms, spread_twap_period_ms);
-    assert_market_fees(registry_config, maker_fee, taker_fee);
-    assert_priority_taker_fee(registry_config, priority_taker_fee);
-    assert_bad_debt_limits(max_bad_debt, max_socialize_losses_mr_decrease);
-    assert_liquidation_fees(registry_config, liquidation_fee, insurance_fund_fee);
+    assert_spread_twap_parameters(
+        registry_config,
+        p.spread_twap_frequency_ms,
+        p.spread_twap_period_ms,
+    );
+    assert_market_fees(registry_config, p.maker_fee, p.taker_fee);
+    assert_priority_taker_fee(registry_config, p.priority_taker_fee);
+    assert_bad_debt_limits(p.max_bad_debt, p.max_socialize_losses_mr_decrease);
+    assert_liquidation_fees(registry_config, p.liquidation_fee, p.insurance_fund_fee);
     assert_liquidation_fees_against_mmr(
-        margin_ratio_maintenance,
-        liquidation_fee,
-        insurance_fund_fee,
+        p.margin_ratio_maintenance,
+        p.liquidation_fee,
+        p.insurance_fund_fee,
     );
-    assert_lot_and_tick_sizes(lot_size, tick_size);
+    assert_lot_and_tick_sizes(p.lot_size, p.tick_size);
 
     let params = create_market_params(
         registry_config,
-        margin_ratio_initial,
-        margin_ratio_maintenance,
         base_storage_id,
         collateral_storage_id,
         base_source_id,
         collateral_source_id,
-        funding_frequency_ms,
-        funding_period_ms,
-        premium_twap_frequency_ms,
-        premium_twap_period_ms,
-        spread_twap_frequency_ms,
-        spread_twap_period_ms,
-        maker_fee,
-        taker_fee,
-        liquidation_fee,
-        insurance_fund_fee,
-        lot_size,
-        tick_size,
-        max_bad_debt,
-        max_socialize_losses_mr_decrease,
-        priority_taker_fee,
+        p,
         scaling_factor,
     );
     let state = create_market_state(clock.timestamp_ms());
@@ -598,27 +659,11 @@ public(package) fun set_collateral_oracle_params(
 /// paying above the reference gas price, or `none` to refuse them.
 fun create_market_params(
     registry_config: &Config,
-    margin_ratio_initial: u256,
-    margin_ratio_maintenance: u256,
     base_storage_id: u32,
     collateral_storage_id: u32,
     base_source_id: u16,
     collateral_source_id: u16,
-    funding_frequency_ms: u64,
-    funding_period_ms: u64,
-    premium_twap_frequency_ms: u64,
-    premium_twap_period_ms: u64,
-    spread_twap_frequency_ms: u64,
-    spread_twap_period_ms: u64,
-    maker_fee: u256,
-    taker_fee: u256,
-    liquidation_fee: u256,
-    insurance_fund_fee: u256,
-    lot_size: u64,
-    tick_size: u64,
-    max_bad_debt: u256,
-    max_socialize_losses_mr_decrease: u256,
-    priority_taker_fee: Option<u256>,
+    p: &MarketCreationParams,
     scaling_factor: u256,
 ): MarketParams {
     MarketParams {
@@ -629,27 +674,27 @@ fun create_market_params(
             collateral_source_id,
             base_pfs_tolerance: 10_000,
             collateral_pfs_tolerance: 30_000,
-            lot_size,
-            tick_size,
+            lot_size: p.lot_size,
+            tick_size: p.tick_size,
             scaling_factor,
             collateral_haircut: 0,
-            margin_ratio_initial,
-            margin_ratio_maintenance,
+            margin_ratio_initial: p.margin_ratio_initial,
+            margin_ratio_maintenance: p.margin_ratio_maintenance,
         },
         fees_params: FeesParams {
-            maker_fee,
-            taker_fee,
-            liquidation_fee,
-            insurance_fund_fee,
-            priority_taker_fee,
+            maker_fee: p.maker_fee,
+            taker_fee: p.taker_fee,
+            liquidation_fee: p.liquidation_fee,
+            insurance_fund_fee: p.insurance_fund_fee,
+            priority_taker_fee: p.priority_taker_fee,
         },
         twap_params: TwapParams {
-            funding_frequency_ms,
-            funding_period_ms,
-            premium_twap_frequency_ms,
-            premium_twap_period_ms,
-            spread_twap_frequency_ms,
-            spread_twap_period_ms,
+            funding_frequency_ms: p.funding_frequency_ms,
+            funding_period_ms: p.funding_period_ms,
+            premium_twap_frequency_ms: p.premium_twap_frequency_ms,
+            premium_twap_period_ms: p.premium_twap_period_ms,
+            spread_twap_frequency_ms: p.spread_twap_frequency_ms,
+            spread_twap_period_ms: p.spread_twap_period_ms,
         },
         limits_params: LimitsParams {
             min_order_usd_value: registry_config.low_min_order_usd_value(),
@@ -659,8 +704,8 @@ fun create_market_params(
             max_open_interest_position_percent: 200_000_000_000_000_000, // 20%
             max_book_index_spread: ifixed::from_u64fraction(5, 100),
             max_index_twap_divergence: ifixed::from_u64fraction(5, 100),
-            max_bad_debt,
-            max_socialize_losses_mr_decrease,
+            max_bad_debt: p.max_bad_debt,
+            max_socialize_losses_mr_decrease: p.max_socialize_losses_mr_decrease,
         },
     }
 }

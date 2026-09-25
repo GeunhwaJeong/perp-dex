@@ -514,6 +514,23 @@ def main():
             u64(4),
             assign="ob",
         )
+        # The creation parameters are a builder: the required values first, then each group.
+        cmds += call(
+            f"{PERP}::market::new_creation_params",
+            [],
+            u256(IMR),
+            u256(MMR),
+            u64(LOT),
+            u64(TICK),
+            u256(MAX_BAD_DEBT),
+            u256(MAX_SOCIALIZE_MR_DECREASE),
+            assign="params",
+        )
+        cmds += call(f"{PERP}::market::set_fees", [], "params", u256(MAKER_FEE), u256(TAKER_FEE), u256(LIQ_FEE), u256(IF_FEE))
+        cmds += call(f"{PERP}::market::set_funding", [], "params", u64(60_000), u64(21_600_000))
+        cmds += call(f"{PERP}::market::set_premium_twap", [], "params", u64(1_000), u64(60_000))
+        cmds += call(f"{PERP}::market::set_spread_twap", [], "params", u64(1_000), u64(60_000))
+        cmds += call(f"{PERP}::market::set_priority_taker_fee", [], "params", f"some({u256(PRIORITY_TAKER_FEE)})")
         cmds += call(
             f"{PERP}::clearing_house::create_clearing_house",
             [TUSD, VK, ADMIN],
@@ -526,23 +543,7 @@ def main():
             obj(pfs_tusd),
             u16(source_id),
             u16(source_id),
-            u256(IMR),
-            u256(MMR),
-            u64(60_000),
-            u64(21_600_000),
-            u64(1_000),
-            u64(60_000),
-            u64(1_000),
-            u64(60_000),
-            u256(MAKER_FEE),
-            u256(TAKER_FEE),
-            u256(LIQ_FEE),
-            u256(IF_FEE),
-            u64(LOT),
-            u64(TICK),
-            u256(MAX_BAD_DEBT),
-            u256(MAX_SOCIALIZE_MR_DECREASE),
-            f"some({u256(PRIORITY_TAKER_FEE)})",
+            "params",
             assign="ch",
         )
         cmds += call(f"{PERP}::clearing_house::register_market", [VK, ADMIN, TUSD], obj(registry), obj(perp_vk), "ch")

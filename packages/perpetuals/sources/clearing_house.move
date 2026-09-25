@@ -23,7 +23,7 @@ use perpetuals::authority::{
 };
 use perpetuals::events::{Self, FilledMakerOrder};
 use perpetuals::keys;
-use perpetuals::market::{Self, MarketParams, MarketState};
+use perpetuals::market::{Self, MarketCreationParams, MarketParams, MarketState};
 use perpetuals::orderbook::{Self, Order, Orderbook};
 use perpetuals::registry::Registry;
 use position::position::{Self, Position};
@@ -593,9 +593,7 @@ public fun create_orderbook<VendorKey, ADMIN_OR_ASSISTANT>(
     )
 }
 
-/// Creates a market. Every risk parameter that has no safe default is passed here: see
-/// `market::create_market_params` for the bad debt policy (`max_bad_debt`,
-/// `max_socialize_losses_mr_decrease`) and the priority taker fee.
+/// Creates a market from `params`, built with `market::new_creation_params` and its setters.
 public fun create_clearing_house<T, VendorKey, ADMIN_OR_ASSISTANT>(
     orderbook: Orderbook,
     cap: &AuthorityCap<VENDOR<VendorKey>, ADMIN_OR_ASSISTANT>,
@@ -606,23 +604,7 @@ public fun create_clearing_house<T, VendorKey, ADMIN_OR_ASSISTANT>(
     collateral_oracle: &PriceFeedStorage,
     base_source_id: u16,
     collateral_source_id: u16,
-    margin_ratio_initial: u256,
-    margin_ratio_maintenance: u256,
-    funding_frequency_ms: u64,
-    funding_period_ms: u64,
-    premium_twap_frequency_ms: u64,
-    premium_twap_period_ms: u64,
-    spread_twap_frequency_ms: u64,
-    spread_twap_period_ms: u64,
-    maker_fee: u256,
-    taker_fee: u256,
-    liquidation_fee: u256,
-    insurance_fund_fee: u256,
-    lot_size: u64,
-    tick_size: u64,
-    max_bad_debt: u256,
-    max_socialize_losses_mr_decrease: u256,
-    priority_taker_fee: Option<u256>,
+    params: &MarketCreationParams,
     ctx: &mut TxContext,
 ): ClearingHouse<T> {
     create_clearing_house_(
@@ -635,23 +617,7 @@ public fun create_clearing_house<T, VendorKey, ADMIN_OR_ASSISTANT>(
         base_source_id,
         collateral_source_id,
         (coin_metadata.get_decimals() as u64),
-        margin_ratio_initial,
-        margin_ratio_maintenance,
-        funding_frequency_ms,
-        funding_period_ms,
-        premium_twap_frequency_ms,
-        premium_twap_period_ms,
-        spread_twap_frequency_ms,
-        spread_twap_period_ms,
-        maker_fee,
-        taker_fee,
-        liquidation_fee,
-        insurance_fund_fee,
-        lot_size,
-        tick_size,
-        max_bad_debt,
-        max_socialize_losses_mr_decrease,
-        priority_taker_fee,
+        params,
         ctx,
     )
 }
@@ -666,23 +632,7 @@ public fun create_clearing_house_with_currency<T, VendorKey, ADMIN_OR_ASSISTANT>
     collateral_oracle: &PriceFeedStorage,
     base_source_id: u16,
     collateral_source_id: u16,
-    margin_ratio_initial: u256,
-    margin_ratio_maintenance: u256,
-    funding_frequency_ms: u64,
-    funding_period_ms: u64,
-    premium_twap_frequency_ms: u64,
-    premium_twap_period_ms: u64,
-    spread_twap_frequency_ms: u64,
-    spread_twap_period_ms: u64,
-    maker_fee: u256,
-    taker_fee: u256,
-    liquidation_fee: u256,
-    insurance_fund_fee: u256,
-    lot_size: u64,
-    tick_size: u64,
-    max_bad_debt: u256,
-    max_socialize_losses_mr_decrease: u256,
-    priority_taker_fee: Option<u256>,
+    params: &MarketCreationParams,
     ctx: &mut TxContext,
 ): ClearingHouse<T> {
     create_clearing_house_(
@@ -695,23 +645,7 @@ public fun create_clearing_house_with_currency<T, VendorKey, ADMIN_OR_ASSISTANT>
         base_source_id,
         collateral_source_id,
         (currency.decimals() as u64),
-        margin_ratio_initial,
-        margin_ratio_maintenance,
-        funding_frequency_ms,
-        funding_period_ms,
-        premium_twap_frequency_ms,
-        premium_twap_period_ms,
-        spread_twap_frequency_ms,
-        spread_twap_period_ms,
-        maker_fee,
-        taker_fee,
-        liquidation_fee,
-        insurance_fund_fee,
-        lot_size,
-        tick_size,
-        max_bad_debt,
-        max_socialize_losses_mr_decrease,
-        priority_taker_fee,
+        params,
         ctx,
     )
 }
@@ -3416,23 +3350,7 @@ fun create_clearing_house_<T, VendorKey, ADMIN_OR_ASSISTANT>(
     base_source_id: u16,
     collateral_source_id: u16,
     decimals: u64,
-    margin_ratio_initial: u256,
-    margin_ratio_maintenance: u256,
-    funding_frequency_ms: u64,
-    funding_period_ms: u64,
-    premium_twap_frequency_ms: u64,
-    premium_twap_period_ms: u64,
-    spread_twap_frequency_ms: u64,
-    spread_twap_period_ms: u64,
-    maker_fee: u256,
-    taker_fee: u256,
-    liquidation_fee: u256,
-    insurance_fund_fee: u256,
-    lot_size: u64,
-    tick_size: u64,
-    max_bad_debt: u256,
-    max_socialize_losses_mr_decrease: u256,
-    priority_taker_fee: Option<u256>,
+    params: &MarketCreationParams,
     ctx: &mut TxContext,
 ): ClearingHouse<T> {
     registry.assert_package_version();
@@ -3448,27 +3366,11 @@ fun create_clearing_house_<T, VendorKey, ADMIN_OR_ASSISTANT>(
     let (market_params, market_state) = market::create_market_objects(
         registry.config(),
         clock,
-        margin_ratio_initial,
-        margin_ratio_maintenance,
         base_storage_id,
         collateral_storage_id,
         base_source_id,
         collateral_source_id,
-        funding_frequency_ms,
-        funding_period_ms,
-        premium_twap_frequency_ms,
-        premium_twap_period_ms,
-        spread_twap_frequency_ms,
-        spread_twap_period_ms,
-        maker_fee,
-        taker_fee,
-        liquidation_fee,
-        insurance_fund_fee,
-        lot_size,
-        tick_size,
-        max_bad_debt,
-        max_socialize_losses_mr_decrease,
-        priority_taker_fee,
+        params,
         (ifixed::decimal_scalar_from_decimals(decimals) as u256),
     );
     let id = object::new(ctx);
@@ -3483,12 +3385,18 @@ fun create_clearing_house_<T, VendorKey, ADMIN_OR_ASSISTANT>(
     };
     df::add(&mut clearing_house.id, keys::market_vault(), vault);
     let ch_id = clearing_house.id.to_inner();
+    let (maker_fee, taker_fee) = market_params.maker_taker_fees();
+    let (liquidation_fee, insurance_fund_fee) = market_params.liquidation_fee_rates();
+    let (funding_frequency_ms, funding_period_ms) = market_params.funding_params();
+    let (premium_twap_frequency_ms, premium_twap_period_ms) = market_params.premium_twap_params();
+    let (spread_twap_frequency_ms, spread_twap_period_ms) = market_params.spread_twap_params();
+    let (max_bad_debt, max_socialize_losses_mr_decrease) = market_params.max_bad_debt_thresholds();
     events::emit_created_clearing_house(
         ch_id,
         collateral_symbol<T>(),
         decimals,
-        margin_ratio_initial,
-        margin_ratio_maintenance,
+        market_params.margin_ratio_initial(),
+        market_params.margin_ratio_maintenance(),
         base_storage_id,
         base_source_id,
         collateral_storage_id,
@@ -3503,11 +3411,11 @@ fun create_clearing_house_<T, VendorKey, ADMIN_OR_ASSISTANT>(
         taker_fee,
         liquidation_fee,
         insurance_fund_fee,
-        lot_size,
-        tick_size,
+        market_params.lot_size(),
+        market_params.tick_size(),
         max_bad_debt,
         max_socialize_losses_mr_decrease,
-        priority_taker_fee,
+        market_params.priority_taker_fee(),
     );
     let vendor_clearing_houses: &mut vector<ID> = df::borrow_mut(
         registry.borrow_mut_id(),
