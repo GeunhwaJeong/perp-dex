@@ -47,13 +47,21 @@ Every package builds without warnings.
 
 ## Unit tests
 
-`ifixed`, `ordered_map` and `position` carry Move unit tests under their `tests/` directories:
-the fixed-point arithmetic is checked against a sign-and-magnitude reference on edge cases and
-pseudo-random operands, the B+ tree against a sorted vector under random insert, remove and
-batch-drop sequences, and the position accounting on hand-computed fills, funding and margin cases.
+Four packages carry Move unit tests under their `tests/` directories, 173 in total:
+
+| Package | Tests | What is checked |
+|---|---|---|
+| `ifixed` | 32 | Every arithmetic variant against a sign-and-magnitude reference, on edge values and pseudo-random operands, including rounding directions and overflow aborts |
+| `ordered_map` | 21 | The B+ tree against a sorted vector under insert, remove, try-remove, clear and batch-drop sequences with the smallest node parameters |
+| `position` | 34 | Fills on both sides with their rounding, taker settlement, funding, free collateral, maker fill restoration, margin requirement checks, bankruptcy price |
+| `perpetuals` | 86 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization and ADL (13); pausing, close and settlement, treasury, proposals, freezing (17) |
+
+The perpetuals tests run on a `test_scenario` fixture (`tests/test_support.move`) that stands up
+the vendor, oracle and perpetuals packages, a mock price source and one BTC/USD market with the
+localnet suite's parameters.
 
 ```bash
-cd packages/ifixed && haneul move test --build-env mainnet
+cd packages/perpetuals && haneul move test --build-env mainnet
 ```
 
 ## Localnet end-to-end tests
@@ -108,8 +116,8 @@ orders, and the vault's forced-withdrawal path.
 
 ## Status
 
-The packages are not published. Unit tests cover the three leaf packages above; the other seven
-are only exercised by the localnet suite.
+The packages are not published. Unit tests cover `ifixed`, `ordered_map`, `position` and
+`perpetuals`; the oracle, vendor and vault packages are only exercised by the localnet suite.
 
 ## License
 
