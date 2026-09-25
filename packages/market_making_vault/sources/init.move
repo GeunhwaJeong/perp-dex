@@ -16,3 +16,8 @@ fun init(witness: INIT, ctx: &mut TxContext) {
     config::create_config_and_share(&witness, ctx);
     package::claim_and_keep(witness, ctx)
 }
+
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(INIT {}, ctx)
+}

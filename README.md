@@ -47,7 +47,7 @@ Every package builds without warnings.
 
 ## Unit tests
 
-Five packages carry Move unit tests under their `tests/` directories, 230 in total:
+Six packages carry Move unit tests under their `tests/` directories, 255 in total:
 
 | Package | Tests | What is checked |
 |---|---|---|
@@ -55,11 +55,12 @@ Five packages carry Move unit tests under their `tests/` directories, 230 in tot
 | `ordered_map` | 21 | The B+ tree against a sorted vector under insert, remove, try-remove, clear and batch-drop sequences with the smallest node parameters |
 | `position` | 34 | Fills on both sides with their rounding, taker settlement, funding, free collateral, maker fill restoration, margin requirement checks, bankruptcy price |
 | `oracle_pyth` | 14 | Exponent scaling of Pyth prices to 18 decimals, feed creation from a Pyth price object with its millisecond timestamp, the feed's binding to that object, source authorization and versioning, feed administration |
+| `market_making_vault` | 25 | LP pricing on cash and on margin, the withdraw request lifecycle, owner-processed withdrawals with the owner fee and treasury, and forced withdrawals: delay, cash-only, closing the position for a dominant share, the partial-close margin band for a small share, order cancelation, and the force-withdraw pause window |
 | `perpetuals` | 129 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization and ADL (13); pausing, close and settlement, treasury, proposals, freezing (17); stop loss / take profit and standalone stop tickets (23); TWAP tickets (20) |
 
 The perpetuals tests run on a `test_scenario` fixture (`tests/test_support.move`) that stands up
 the vendor, oracle and perpetuals packages, a mock price source and one BTC/USD market with the
-localnet suite's parameters.
+localnet suite's parameters; the vault tests add a vault over that market.
 
 ```bash
 cd packages/perpetuals && haneul move test --build-env mainnet
@@ -103,8 +104,8 @@ In total 28 of the checks are actions that must be rejected with a specific abor
 step the script also checks that each market's collateral equals the sum of position equity at entry
 prices plus accrued fees.
 
-Not covered yet: the vault's forced-withdrawal path. Stop and TWAP orders and the Pyth adapter are
-covered by unit tests (Pyth and Wormhole are not on a fresh localnet).
+Stop and TWAP orders, the Pyth adapter (Pyth and Wormhole are not on a fresh localnet) and the
+vault's forced-withdrawal path are covered by unit tests rather than by this suite.
 
 ## Operational notes
 
@@ -124,8 +125,8 @@ See `docs/market-launch.md` for the launch order and the operators a market depe
 ## Status
 
 The packages are not published. Unit tests cover `ifixed`, `ordered_map`, `position`,
-`perpetuals` and `oracle_pyth`; the aggregator, vendor and vault packages are only exercised by the
-localnet suite.
+`perpetuals`, `oracle_pyth` and `market_making_vault`; the aggregator, vendor and the small
+`authority_cap` and `af_lp` packages are only exercised by the localnet suite.
 
 ## License
 

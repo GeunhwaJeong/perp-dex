@@ -121,6 +121,7 @@ public fun pfs_tusd_id(fx: &Fx): ID { fx.pfs_tusd }
 public fun account_id(fx: &Fx, who: u64): u64 { fx.accounts[who].account_id }
 public fun account_obj(fx: &Fx, who: u64): ID { fx.accounts[who].obj }
 public fun cap(fx: &Fx, who: u64): &AuthorityCap<ACCOUNT, ADMIN> { &fx.accounts[who].cap }
+public fun coin_metadata(fx: &Fx): &CoinMetadata<TUSD> { &fx.coin_metadata }
 
 /// Initial TUSD deposits and clearing house allocations per account.
 public fun deposits(): vector<u64> { vector[1_000_000, 100_000, 200_000] }
