@@ -4,11 +4,9 @@
 module position::position;
 
 use ifixed::ifixed;
-use std::u256;
 
 // === Errors and constants (original names from the published interface) ===
 
-macro fun ifixed_overflow(): u64 { 2000 }
 macro fun initial_margin_requirement_violated(): u64 { 2001 }
 macro fun position_bad_debt(): u64 { 2002 }
 macro fun invalid_position_imr(): u64 { 2003 }
@@ -29,12 +27,9 @@ public struct Position has store {
 
 // === Functions ===
 
-// All amounts are ifixed values: signed 18-decimal fixed point in two's complement. Several
-// functions below carry ifixed arithmetic inlined, spelled with literals:
-// - `x >= (1 << 255)` tests whether `x` is negative;
-// - `(x ^ u256::max_value!()) + 1` and `((x ^ ((1 << 255) - 1)) + 1) ^ (1 << 255)` both compute
-//   `-x` (the second one aborts only for the minimum value);
-// - `1_000_000_000_000_000_000` is 1.0.
+// All amounts are ifixed values: signed 18-decimal fixed point in two's complement. Base amounts
+// are positive for longs and negative for shorts, and the quote notional carries the sign of the
+// base. Overflows abort with `ifixed`'s overflow code.
 
 public fun create_position(
     mkt_funding_rate_long: u256,
@@ -99,140 +94,88 @@ public fun reset_collateral(position: &mut Position): u256 {
     ifixed::abs(collateral)
 }
 
+/// Converts the USD amount into collateral units, rounding toward negative infinity, and adds it
+/// to the collateral. Returns the new collateral.
 public fun add_to_collateral_usd(
     position: &mut Position,
     fixed_usd: u256,
     collateral_price: u256
 ): u256 {
-    // Converts the USD amount into collateral units, rounding toward negative infinity, and adds
-    // it to the collateral.
-    let new_collateral;
-    if (fixed_usd >= (1 << 255)) {
-        let fixed_usd_abs = (fixed_usd ^ u256::max_value!()) + 1;
-        let collateral_abs_delta =
-            (fixed_usd_abs * 1_000_000_000_000_000_000 - 1) / collateral_price + 1;
-        if (position.collateral >= (1 << 255)) {
-            new_collateral = position.collateral - collateral_abs_delta;
-            if (new_collateral < (1 << 255)) {
-                abort ifixed_overflow!()
-            }
-        } else {
-            if (position.collateral >= collateral_abs_delta) {
-                new_collateral = position.collateral - collateral_abs_delta;
-            } else {
-                new_collateral =
-                    ((collateral_abs_delta - position.collateral) ^ u256::max_value!()) + 1;
-            }
-        }
-    } else {
-        let collateral_delta = fixed_usd * 1_000_000_000_000_000_000 / collateral_price;
-        if (position.collateral >= (1 << 255)) {
-            let collateral_abs = (position.collateral ^ u256::max_value!()) + 1;
-            if (collateral_delta >= collateral_abs) {
-                new_collateral = collateral_delta - collateral_abs;
-            } else {
-                new_collateral = ((collateral_abs - collateral_delta) ^ u256::max_value!()) + 1;
-            }
-        } else {
-            new_collateral = position.collateral + collateral_delta;
-            if (new_collateral >= (1 << 255)) {
-                abort ifixed_overflow!()
-            }
-        }
-    };
-    position.collateral = new_collateral;
-    new_collateral
+    let collateral_delta = ifixed::div(fixed_usd, collateral_price);
+    position.collateral = ifixed::add(position.collateral, collateral_delta);
+    position.collateral
 }
 
 // Applies a fill of `base_asset_delta` for `quote_asset_delta` (both positive) on side `side`
 // (true for asks). Reducing a position realizes the pnl of the closed part, whose entry notional is
 // taken pro rata from the position's notional; the rest of a fill that flips the position opens it
 // on the other side. Returns the realized pnl and the new base amount.
-#[allow(dead_code)]
 public fun add_base_to_position(
     position: &mut Position,
     side: bool,
     base_asset_delta: u256,
     quote_asset_delta: u256,
 ): (u256, u256) {
+    let is_ask = side;
     let base = position.base_asset_amount;
-    let pnl;
-    if (side) {
-        if (base < (1 << 255)) {
-            // Selling from a long (or flat) position.
-            let quote = position.quote_asset_notional_amount;
-            if (base_asset_delta <= base) {
-                let closed_quote = (quote * base_asset_delta + base - 1) / base;
-                position.base_asset_amount = base - base_asset_delta;
-                position.quote_asset_notional_amount = quote - closed_quote;
-                if (quote_asset_delta >= closed_quote) {
-                    return (quote_asset_delta - closed_quote, position.base_asset_amount)
-                };
-                return (
-                    (((closed_quote - quote_asset_delta) ^ ((1 << 255) - 1)) + 1) ^ (1 << 255),
-                    position.base_asset_amount,
-                )
-            };
-            // The long is closed and a short opened with the rest of the fill.
-            let closing_quote = quote_asset_delta * base / base_asset_delta;
-            if (closing_quote >= quote) {
-                pnl = closing_quote - quote;
-            } else {
-                pnl = (((quote - closing_quote) ^ ((1 << 255) - 1)) + 1) ^ (1 << 255);
-            };
-            position.base_asset_amount = ((base_asset_delta - base) ^ u256::max_value!()) + 1;
-            position.quote_asset_notional_amount =
-                (((quote_asset_delta - closing_quote) ^ ((1 << 255) - 1)) + 1) ^ (1 << 255);
-            return (pnl, position.base_asset_amount)
-        };
-        // Selling into a short position.
-        let new_base_abs = (base ^ u256::max_value!()) + 1 + base_asset_delta;
-        assert!(new_base_abs < (1 << 255), ifixed_overflow!());
-        position.base_asset_amount = (new_base_abs ^ u256::max_value!()) + 1;
-        let quote = position.quote_asset_notional_amount;
-        let new_quote_abs = (((quote ^ ((1 << 255) - 1)) + 1) ^ (1 << 255)) + quote_asset_delta;
-        assert!(new_quote_abs < (1 << 255), ifixed_overflow!());
+    let quote = position.quote_asset_notional_amount;
+    let is_short = ifixed::is_neg(base);
+    // The magnitudes of the position: base is signed by side, and the notional carries the
+    // same sign as the base.
+    let base_abs = ifixed::abs(base);
+    let quote_abs = ifixed::abs(quote);
+
+    if (is_ask == is_short) {
+        // The fill grows the position on its own side (or opens it from flat).
+        let new_base_abs = ifixed::add(base_abs, base_asset_delta);
+        let new_quote_abs = ifixed::add(quote_abs, quote_asset_delta);
+        position.base_asset_amount = if (is_short) ifixed::neg(new_base_abs) else new_base_abs;
         position.quote_asset_notional_amount =
-            ((new_quote_abs ^ ((1 << 255) - 1)) + 1) ^ (1 << 255);
+            if (is_short) ifixed::neg(new_quote_abs) else new_quote_abs;
         return (0, position.base_asset_amount)
     };
-    if (base < (1 << 255)) {
-        // Buying into a long (or flat) position.
-        let new_base = base + base_asset_delta;
-        assert!(new_base < (1 << 255), ifixed_overflow!());
-        let new_quote = position.quote_asset_notional_amount + quote_asset_delta;
-        assert!(new_quote < (1 << 255), ifixed_overflow!());
-        position.base_asset_amount = new_base;
-        position.quote_asset_notional_amount = new_quote;
-        return (0, position.base_asset_amount)
-    };
-    // Buying from a short position.
-    let base_abs = (base ^ u256::max_value!()) + 1;
-    let quote_abs = ((position.quote_asset_notional_amount ^ ((1 << 255) - 1)) + 1) ^ (1 << 255);
+
     if (base_asset_delta <= base_abs) {
-        let closed_quote = quote_abs * base_asset_delta / base_abs;
+        // The fill reduces the position. The closed part of the notional is taken pro rata,
+        // rounded so that the realized pnl never favors the position: up when closing a long
+        // (the fill's proceeds are compared against a larger cost), down when closing a short.
+        let closed_quote = if (is_short) mul_div(quote_abs, base_asset_delta, base_abs)
+        else mul_div_up(quote_abs, base_asset_delta, base_abs);
+        let remaining_base_abs = base_abs - base_asset_delta;
+        let remaining_quote_abs = quote_abs - closed_quote;
         position.base_asset_amount =
-            (((base_abs - base_asset_delta) ^ ((1 << 255) - 1)) + 1) ^ (1 << 255);
+            if (is_short) ifixed::neg(remaining_base_abs) else remaining_base_abs;
         position.quote_asset_notional_amount =
-            (((quote_abs - closed_quote) ^ ((1 << 255) - 1)) + 1) ^ (1 << 255);
-        if (closed_quote >= quote_asset_delta) {
-            return (closed_quote - quote_asset_delta, position.base_asset_amount)
-        };
-        return (
-            (((quote_asset_delta - closed_quote) ^ ((1 << 255) - 1)) + 1) ^ (1 << 255),
-            position.base_asset_amount,
-        )
+            if (is_short) ifixed::neg(remaining_quote_abs) else remaining_quote_abs;
+        // A long is sold for the fill's quote and bought back for the closed notional.
+        let pnl = if (is_short) ifixed::sub(closed_quote, quote_asset_delta)
+        else ifixed::sub(quote_asset_delta, closed_quote);
+        return (pnl, position.base_asset_amount)
     };
-    // The short is closed and a long opened with the rest of the fill.
-    position.base_asset_amount = base_asset_delta - base_abs;
-    let closing_quote = (quote_asset_delta * base_abs - 1) / base_asset_delta + 1;
-    if (quote_abs >= closing_quote) {
-        pnl = quote_abs - closing_quote;
-    } else {
-        pnl = (((closing_quote - quote_abs) ^ ((1 << 255) - 1)) + 1) ^ (1 << 255);
-    };
-    position.quote_asset_notional_amount = quote_asset_delta - closing_quote;
+
+    // The fill closes the whole position and opens one on the other side with the rest. The
+    // closing part of the fill's quote is pro rata as well, rounded against the position.
+    let closing_quote = if (is_short) mul_div_up(quote_asset_delta, base_abs, base_asset_delta)
+    else mul_div(quote_asset_delta, base_abs, base_asset_delta);
+    let pnl = if (is_short) ifixed::sub(quote_abs, closing_quote)
+    else ifixed::sub(closing_quote, quote_abs);
+    let opened_base_abs = base_asset_delta - base_abs;
+    let opened_quote_abs = quote_asset_delta - closing_quote;
+    // The new position is on the side the fill was on: a sale opens a short.
+    position.base_asset_amount = if (is_ask) ifixed::neg(opened_base_abs) else opened_base_abs;
+    position.quote_asset_notional_amount =
+        if (is_ask) ifixed::neg(opened_quote_abs) else opened_quote_abs;
     (pnl, position.base_asset_amount)
+}
+
+/// `a * b / c` on magnitudes, rounded down, with a single rounding step.
+fun mul_div(a: u256, b: u256, c: u256): u256 {
+    a * b / c
+}
+
+/// `a * b / c` on magnitudes, rounded up, with a single rounding step.
+fun mul_div_up(a: u256, b: u256, c: u256): u256 {
+    (a * b + c - 1) / c
 }
 
 public fun apply_taker_fills_and_settle(
@@ -262,39 +205,14 @@ public fun apply_taker_fills_and_settle(
     } else {
         bid_pnl = 0;
     };
-    // Change of the long open interest: max(base_now, 0) - max(base_before, 0).
-    let open_interest_delta;
-    if (base_now < (1 << 255)) {
-        if (base_before < (1 << 255)) {
-            if (base_now >= base_before) {
-                open_interest_delta = base_now - base_before;
-            } else {
-                open_interest_delta = ((base_before - base_now) ^ u256::max_value!()) + 1;
-            }
-        } else {
-            open_interest_delta = base_now;
-        }
-    } else {
-        if (base_before < (1 << 255)) {
-            open_interest_delta = ((base_before ^ ((1 << 255) - 1)) + 1) ^ (1 << 255);
-        } else {
-            open_interest_delta = 0;
-        }
-    };
+    // Only long exposure counts toward open interest.
+    let open_interest_delta =
+        ifixed::sub(ifixed::max(base_now, 0), ifixed::max(base_before, 0));
     let pnl = ifixed::add(ask_pnl, bid_pnl);
     let quote_filled = quote_filled_ask + quote_filled_bid;
-    // A negative taker fee is a rebate; the fee amount is rounded toward zero either way.
-    let is_rebate = taker_fee >= (1 << 255);
-    let taker_fee_abs_amount = (if (is_rebate) (taker_fee ^ u256::max_value!()) + 1 else taker_fee)
-        * quote_filled
-        / 1_000_000_000_000_000_000;
-    let taker_fee_amount;
-    if (is_rebate) {
-        taker_fee_amount = ((taker_fee_abs_amount ^ ((1 << 255) - 1)) + 1) ^ (1 << 255);
-    } else {
-        taker_fee_amount = taker_fee_abs_amount;
-    };
-    let integrator_fee_amount = integrator_fee * quote_filled / 1_000_000_000_000_000_000;
+    // Fee amounts are rounded toward zero; a negative taker fee is a rebate.
+    let taker_fee_amount = ifixed::mul_toward_zero(taker_fee, quote_filled);
+    let integrator_fee_amount = ifixed::mul_toward_zero(integrator_fee, quote_filled);
     let collateral_change =
         ifixed::sub(pnl, ifixed::add(taker_fee_amount, integrator_fee_amount));
     let _ = add_to_collateral_usd(position, collateral_change, collateral_price);
@@ -526,24 +444,16 @@ public fun apply_maker_fill_or_restore_if_bad_debt(
     );
     // The fill is kept only if the margin stays non-negative and covers the liquidation fee on the
     // whole position, and the fill does not grow the position beyond `max_maker_abs_base`.
-    // Otherwise the position is restored. The `loop` only serves as a block to break out of.
-    loop {
-        if (margin >= (1 << 255)) break;
-        let base = position.base_asset_amount;
-        let base_abs;
-        if (base >= (1 << 255)) {
-            base_abs = (base ^ u256::max_value!()) + 1;
-        } else {
-            base_abs = base;
-        };
-        let liquidation_fee_usd = base_abs * mark_price / 1_000_000_000_000_000_000
-            * liquidation_fee
-            / 1_000_000_000_000_000_000;
-        if (liquidation_fee_usd > margin) break;
-        let exceeds_max_base = max_maker_abs_base.is_some()
-            && (ifixed::greater_than(ifixed::abs(base_now), ifixed::abs(base_before))
-                && ifixed::greater_than(base_abs, *max_maker_abs_base.borrow()));
-        if (exceeds_max_base) break;
+    // Otherwise the position is restored.
+    let base_abs = ifixed::abs(base_now);
+    let liquidation_fee_usd = ifixed::mul(ifixed::mul(base_abs, mark_price), liquidation_fee);
+    let grows_past_max = max_maker_abs_base.is_some()
+        && ifixed::greater_than(base_abs, ifixed::abs(base_before))
+        && ifixed::greater_than(base_abs, *max_maker_abs_base.borrow());
+    let keep = !ifixed::is_neg(margin)
+        && !ifixed::greater_than(liquidation_fee_usd, margin)
+        && !grows_past_max;
+    if (keep) {
         return (true, pnl, base_now)
     };
     position.collateral = collateral_before;
@@ -640,105 +550,48 @@ public fun abs_net_base(position: &Position): u256 {
     ifixed::max(abs_base_after_bids, abs_base_after_asks)
 }
 
-// Settles the funding accrued since the position's funding rate snapshots into its collateral.
-// Returns whether anything changed, the funding in USD (negative when paid) and the new collateral.
-#[allow(dead_code)]
+/// Settles the funding accrued since the position's funding rate snapshots into its collateral.
+/// Returns whether anything changed, the funding in USD (negative when paid) and the new
+/// collateral.
 public fun settle_position_funding(
     position: &mut Position,
     collateral_price: u256,
     mkt_funding_rate_long: u256,
     mkt_funding_rate_short: u256,
 ): (bool, u256, u256) {
-    let is_short = position.base_asset_amount >= (1 << 255);
-    let (rate_now, rate_before, base_abs);
-    if (is_short) {
-        rate_now = mkt_funding_rate_short;
-        rate_before = position.cum_funding_rate_short;
-        base_abs = (position.base_asset_amount ^ u256::max_value!()) + 1;
+    let base = position.base_asset_amount;
+    let is_short = ifixed::is_neg(base);
+    let (rate_now, rate_before) = if (is_short) {
+        (mkt_funding_rate_short, position.cum_funding_rate_short)
     } else {
-        rate_now = mkt_funding_rate_long;
-        rate_before = position.cum_funding_rate_long;
-        base_abs = position.base_asset_amount;
+        (mkt_funding_rate_long, position.cum_funding_rate_long)
     };
-    let new_collateral;
-    let funding;
-    'settle: {
-        if (rate_now != rate_before) {
-            if (base_abs != 0) {
-                // |rate_now - rate_before| and the direction of the change.
-                let rate_now_is_neg = rate_now >= (1 << 255);
-                let (rate_decreased, rate_delta);
-                if ((rate_before >= (1 << 255)) == rate_now_is_neg) {
-                    if (rate_now >= rate_before) {
-                        rate_delta = rate_now - rate_before;
-                        rate_decreased = false;
-                    } else {
-                        rate_delta = rate_before - rate_now;
-                        rate_decreased = true;
-                    }
-                } else {
-                    rate_decreased = rate_now_is_neg;
-                    if (rate_now_is_neg) {
-                        rate_delta = (rate_now ^ u256::max_value!()) + 1 + rate_before;
-                    } else {
-                        rate_delta = (rate_before ^ u256::max_value!()) + 1 + rate_now;
-                    }
-                };
-                // Scaled by 10^36: dividing by the price gives collateral, by 10^18 gives USD.
-                let funding_scaled = rate_delta * base_abs;
-                // Longs pay when the cumulative rate goes up, shorts when it goes down.
-                if (is_short != rate_decreased) {
-                    // Funding received, rounded down.
-                    let collateral_delta = funding_scaled / collateral_price;
-                    funding = funding_scaled / 1_000_000_000_000_000_000;
-                    if (collateral_delta != 0) {
-                        if (position.collateral >= (1 << 255)) {
-                            let collateral_abs = (position.collateral ^ u256::max_value!()) + 1;
-                            if (collateral_delta >= collateral_abs) {
-                                new_collateral = collateral_delta - collateral_abs;
-                            } else {
-                                new_collateral = position.collateral + collateral_delta;
-                            }
-                        } else {
-                            new_collateral = position.collateral + collateral_delta;
-                            assert!(!(new_collateral >= (1 << 255)), ifixed_overflow!())
-                        };
-                        position.collateral = new_collateral
-                    } else {
-                        new_collateral = position.collateral;
-                    }
-                } else {
-                    // Funding paid, rounded up.
-                    let collateral_delta =
-                        (funding_scaled + collateral_price - 1) / collateral_price;
-                    if (position.collateral >= (1 << 255)) {
-                        new_collateral = position.collateral - collateral_delta;
-                        assert!(new_collateral >= (1 << 255), ifixed_overflow!())
-                    } else {
-                        if (position.collateral >= collateral_delta) {
-                            new_collateral = position.collateral - collateral_delta;
-                        } else {
-                            new_collateral =
-                                ((collateral_delta - position.collateral) ^ u256::max_value!()) + 1;
-                        }
-                    };
-                    let funding_abs =
-                        (funding_scaled + 999_999_999_999_999_999) / 1_000_000_000_000_000_000;
-                    funding = ((funding_abs ^ ((1 << 255) - 1)) + 1) ^ (1 << 255);
-                    position.collateral = new_collateral
-                };
-                return 'settle
-            }
-        };
-        new_collateral = position.collateral;
-        funding = 0;
+    let funding = if (rate_now != rate_before && base != 0) {
+        // Longs pay when the cumulative rate rises, shorts when it falls. Both the collateral
+        // change and the USD amount are rounded against the position, in a single step from the
+        // exact product.
+        let rate_delta = ifixed::sub(rate_now, rate_before);
+        let rate_delta_abs = ifixed::abs(rate_delta);
+        let base_abs = ifixed::abs(base);
+        let receives = is_short != ifixed::is_neg(rate_delta);
+        if (receives) {
+            let collateral_delta = mul_div(rate_delta_abs, base_abs, collateral_price);
+            position.collateral = ifixed::add(position.collateral, collateral_delta);
+            mul_div(rate_delta_abs, base_abs, 1_000_000_000_000_000_000)
+        } else {
+            let collateral_delta = mul_div_up(rate_delta_abs, base_abs, collateral_price);
+            position.collateral = ifixed::sub(position.collateral, collateral_delta);
+            ifixed::neg(mul_div_up(rate_delta_abs, base_abs, 1_000_000_000_000_000_000))
+        }
+    } else {
+        0
     };
     let changed = funding != 0
         || position.cum_funding_rate_long != mkt_funding_rate_long
         || position.cum_funding_rate_short != mkt_funding_rate_short;
     position.cum_funding_rate_long = mkt_funding_rate_long;
     position.cum_funding_rate_short = mkt_funding_rate_short;
-    (changed, funding, new_collateral)
+    (changed, funding, position.collateral)
 }
 
 public fun calculate_position_funding_internal(
