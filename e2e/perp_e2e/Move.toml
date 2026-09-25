@@ -1,0 +1,18 @@
+[package]
+name = "perp_e2e"
+edition = "2024"
+
+[dependencies]
+Haneul = { local = "../../deps/haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../deps/haneul-src/crates/haneul-framework/packages/move-stdlib" }
+perpetuals = { local = "../../packages/perpetuals" }
+vendor = { local = "../../packages/vendor" }
+ifixed = { local = "../../packages/ifixed" }
+authority_cap = { local = "../../packages/authority_cap" }
+position = { local = "../../packages/position" }
+oracle_aggregator = { local = "../../packages/oracle_aggregator" }
+ordered_map = { local = "../../packages/ordered_map" }
+market_making_vault = { local = "../../packages/market_making_vault" }
+
+[addresses]
+perp_e2e = "0x0"
