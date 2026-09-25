@@ -142,6 +142,21 @@ public struct SessionHotPotato<phantom T> {
     session_summary: SessionSummary,
 }
 
+/// What one liquidation step did to the liqee's position. `margin` and `min_margin` are the
+/// position's margin and requirement afterwards at the market's initial margin ratio.
+public struct LiquidationOutcome has copy, drop {
+    margin: u256,
+    min_margin: u256,
+    is_long: bool,
+    base_liquidated: u256,
+    quote_liquidated: u256,
+    pnl: u256,
+    liquidation_fees: u256,
+    insurance_fund_fees: u256,
+    bad_debt: u256,
+    open_interest_delta: u256,
+}
+
 public struct SessionSummary has copy, drop {
     base_filled_ask: u256,
     base_filled_bid: u256,
@@ -2623,18 +2638,7 @@ fun settle_liquidated_position<T>(
     } else {
         clip_size_to_liquidate(size_to_liquidate, base, lot_size)
     };
-    let (
-        margin_after,
-        min_margin_after,
-        is_liqee_long,
-        mut base_liquidated,
-        mut quote_liquidated,
-        mut liqee_pnl,
-        mut liquidation_fees,
-        mut insurance_fund_fees,
-        mut bad_debt,
-        mut open_interest_delta,
-    ) = reduce_liquidated_position(
+    let mut outcome = reduce_liquidated_position(
         position,
         size,
         mark_price,
@@ -2646,24 +2650,11 @@ fun settle_liquidated_position<T>(
     );
     // A partial liquidation must restore the initial margin; otherwise the rest of the
     // position is liquidated too.
-    if (ifixed::less_than(margin_after, min_margin_after)) {
+    if (ifixed::less_than(outcome.margin, outcome.min_margin)) {
         let (base_left, _) = position.base_and_quote_amounts();
-        let remaining_position = position;
-        let size_left = ifixed::abs(base_left);
-        let (
-            _,
-            _,
-            _,
-            extra_base,
-            extra_quote,
-            extra_pnl,
-            extra_liquidation_fees,
-            extra_insurance_fund_fees,
-            extra_bad_debt,
-            extra_open_interest_delta,
-        ) = reduce_liquidated_position(
-            remaining_position,
-            ifixed::to_u128balance(size_left, 1_000_000_000),
+        let rest = reduce_liquidated_position(
+            position,
+            ifixed::to_u128balance(ifixed::abs(base_left), 1_000_000_000),
             mark_price,
             hot_potato.collateral_price,
             insurance_fund_fee,
@@ -2671,18 +2662,12 @@ fun settle_liquidated_position<T>(
             market_imr,
             collateral_haircut,
         );
-        base_liquidated = ifixed::add(base_liquidated, extra_base);
-        quote_liquidated = ifixed::add(quote_liquidated, extra_quote);
-        liqee_pnl = ifixed::add(liqee_pnl, extra_pnl);
-        liquidation_fees = ifixed::add(liquidation_fees, extra_liquidation_fees);
-        insurance_fund_fees = ifixed::add(insurance_fund_fees, extra_insurance_fund_fees);
-        bad_debt = ifixed::add(bad_debt, extra_bad_debt);
-        open_interest_delta = ifixed::add(open_interest_delta, extra_open_interest_delta);
+        outcome.add(&rest);
     };
-    if (insurance_fund_fees != 0) {
+    if (outcome.insurance_fund_fees != 0) {
         transfer_from_vault_to_insurance_fund(
             hot_potato.clearing_house.borrow_mut_market_vault(),
-            ifixed::div(insurance_fund_fees, hot_potato.collateral_price),
+            ifixed::div(outcome.insurance_fund_fees, hot_potato.collateral_price),
             scaling_factor,
         )
     };
@@ -2690,24 +2675,40 @@ fun settle_liquidated_position<T>(
         *ch_id,
         liqee_account_id,
         hot_potato.account_id,
-        is_liqee_long,
-        base_liquidated,
-        quote_liquidated,
-        liqee_pnl,
-        liquidation_fees,
-        insurance_fund_fees,
-        bad_debt,
+        outcome.is_long,
+        outcome.base_liquidated,
+        outcome.quote_liquidated,
+        outcome.pnl,
+        outcome.liquidation_fees,
+        outcome.insurance_fund_fees,
+        outcome.bad_debt,
         mark_price,
     );
     // The liquidator takes over the position (and the fees) when the session ends.
     hot_potato.total_open_interest =
-        ifixed::add(hot_potato.total_open_interest, open_interest_delta);
+        ifixed::add(hot_potato.total_open_interest, outcome.open_interest_delta);
     hot_potato.liqee_account_id = option::some(liqee_account_id);
-    hot_potato.liquidator_fees = liquidation_fees;
-    hot_potato.session_summary.base_liquidated = base_liquidated;
-    hot_potato.session_summary.quote_liquidated = quote_liquidated;
-    hot_potato.session_summary.is_liqee_long = is_liqee_long;
-    hot_potato.session_summary.bad_debt = bad_debt
+    hot_potato.liquidator_fees = outcome.liquidation_fees;
+    hot_potato.session_summary.base_liquidated = outcome.base_liquidated;
+    hot_potato.session_summary.quote_liquidated = outcome.quote_liquidated;
+    hot_potato.session_summary.is_liqee_long = outcome.is_long;
+    hot_potato.session_summary.bad_debt = outcome.bad_debt
+}
+
+/// Folds a follow-up liquidation step into this one: the amounts add up and the margin figures
+/// are those after the last step.
+fun add(outcome: &mut LiquidationOutcome, rest: &LiquidationOutcome) {
+    outcome.margin = rest.margin;
+    outcome.min_margin = rest.min_margin;
+    outcome.base_liquidated = ifixed::add(outcome.base_liquidated, rest.base_liquidated);
+    outcome.quote_liquidated = ifixed::add(outcome.quote_liquidated, rest.quote_liquidated);
+    outcome.pnl = ifixed::add(outcome.pnl, rest.pnl);
+    outcome.liquidation_fees = ifixed::add(outcome.liquidation_fees, rest.liquidation_fees);
+    outcome.insurance_fund_fees =
+        ifixed::add(outcome.insurance_fund_fees, rest.insurance_fund_fees);
+    outcome.bad_debt = ifixed::add(outcome.bad_debt, rest.bad_debt);
+    outcome.open_interest_delta =
+        ifixed::add(outcome.open_interest_delta, rest.open_interest_delta);
 }
 
 public(package) fun reduce_liquidated_position(
@@ -2719,7 +2720,7 @@ public(package) fun reduce_liquidated_position(
     liquidation_fee: u256,
     margin_ratio_required: u256,
     collateral_haircut: u256
-): (u256, u256, bool, u256, u256, u256, u256, u256, u256, u256) {
+): LiquidationOutcome {
     let (base_before, _) = position.base_and_quote_amounts();
     let base_liquidated = ifixed::from_u128balance(size_to_liquidate, 1_000_000_000);
     let quote_liquidated = ifixed::mul(base_liquidated, mark_price);
@@ -2772,7 +2773,7 @@ public(package) fun reduce_liquidated_position(
         margin_ratio_required,
         collateral_haircut,
     );
-    (
+    LiquidationOutcome {
         margin,
         min_margin,
         is_long,
@@ -2780,10 +2781,10 @@ public(package) fun reduce_liquidated_position(
         quote_liquidated,
         pnl,
         liquidation_fees,
-        insurance_fund_fees_paid,
+        insurance_fund_fees: insurance_fund_fees_paid,
         bad_debt,
         open_interest_delta,
-    )
+    }
 }
 
 public(package) fun force_cancel_orders(
