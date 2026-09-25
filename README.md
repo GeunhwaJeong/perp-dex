@@ -47,14 +47,14 @@ Every package builds without warnings.
 
 ## Unit tests
 
-Four packages carry Move unit tests under their `tests/` directories, 173 in total:
+Four packages carry Move unit tests under their `tests/` directories, 216 in total:
 
 | Package | Tests | What is checked |
 |---|---|---|
 | `ifixed` | 32 | Every arithmetic variant against a sign-and-magnitude reference, on edge values and pseudo-random operands, including rounding directions and overflow aborts |
 | `ordered_map` | 21 | The B+ tree against a sorted vector under insert, remove, try-remove, clear and batch-drop sequences with the smallest node parameters |
 | `position` | 34 | Fills on both sides with their rounding, taker settlement, funding, free collateral, maker fill restoration, margin requirement checks, bankruptcy price |
-| `perpetuals` | 86 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization and ADL (13); pausing, close and settlement, treasury, proposals, freezing (17) |
+| `perpetuals` | 129 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization and ADL (13); pausing, close and settlement, treasury, proposals, freezing (17); stop loss / take profit and standalone stop tickets (23); TWAP tickets (20) |
 
 The perpetuals tests run on a `test_scenario` fixture (`tests/test_support.move`) that stands up
 the vendor, oracle and perpetuals packages, a mock price source and one BTC/USD market with the
@@ -102,8 +102,8 @@ In total 28 of the checks are actions that must be rejected with a specific abor
 step the script also checks that each market's collateral equals the sum of position equity at entry
 prices plus accrued fees.
 
-Not covered yet: the Pyth adapter (Pyth and Wormhole are not on a fresh localnet), stop and TWAP
-orders, and the vault's forced-withdrawal path.
+Not covered yet: the Pyth adapter (Pyth and Wormhole are not on a fresh localnet) and the vault's
+forced-withdrawal path. Stop and TWAP orders are covered by unit tests.
 
 ## Operational notes
 
