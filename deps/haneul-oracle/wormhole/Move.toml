@@ -1,0 +1,12 @@
+[package]
+name = "wormhole"
+version = "0.2.0"
+edition = "legacy"
+published-at = "0xcd66f3331f050a8e9d4dbc81932193c961fa565f99ac7515b3dd6ea34e4fda02"
+
+[dependencies]
+Haneul = { local = "../../haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../haneul-src/crates/haneul-framework/packages/move-stdlib" }
+
+[addresses]
+wormhole = "0xcd66f3331f050a8e9d4dbc81932193c961fa565f99ac7515b3dd6ea34e4fda02"

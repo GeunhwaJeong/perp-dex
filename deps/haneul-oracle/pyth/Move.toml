@@ -1,0 +1,13 @@
+[package]
+name = "pyth"
+version = "0.0.2"
+edition = "legacy"
+published-at = "0x9998fae7b6fe1e14f893ee341eb7dfffd83bb28f22ad6507c726c0cf4a322187"
+
+[dependencies]
+Haneul = { local = "../../haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../haneul-src/crates/haneul-framework/packages/move-stdlib" }
+wormhole = { local = "../wormhole" }
+
+[addresses]
+pyth = "0x9998fae7b6fe1e14f893ee341eb7dfffd83bb28f22ad6507c726c0cf4a322187"

@@ -1,0 +1,23 @@
+# Move build outputs
+build/
+
+# Ephemeral localnet publication records written by `haneul client test-publish`
+Pub.*.toml
+
+# Local-only material
+/work/
+/tools/
+/deps/bin/
+.DS_Store
+
+# From the framework checkout, only the two packages the engine builds against (and its license)
+/deps/haneul-src/*
+!/deps/haneul-src/LICENSE
+!/deps/haneul-src/crates/
+/deps/haneul-src/crates/*
+!/deps/haneul-src/crates/haneul-framework/
+/deps/haneul-src/crates/haneul-framework/*
+!/deps/haneul-src/crates/haneul-framework/packages/
+
+# Python bytecode caches
+__pycache__/
