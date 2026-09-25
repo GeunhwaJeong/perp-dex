@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Localnet end-to-end test of the Haneul perp engine in packages/.
 
-Publishes the nine engine packages plus the `perp_e2e` helper to a running localnet, opens a
+Publishes the ten engine packages plus the `perp_e2e` helper to a running localnet, opens a
 BTC/USD market collateralized in TUSD whose prices come from a hand-driven oracle source, then
 trades, cancels, liquidates, collects fees and settles through real transactions, and finally runs
 a market-making vault on a second market. Every amount is checked against a value derived
@@ -54,6 +54,7 @@ PACKAGES = [
     "vendor",
     "oracle_aggregator",
     "perpetuals",
+    "perpetuals_orders",
     "market_making_vault",
 ]
 
@@ -380,7 +381,7 @@ def main():
     TUSD = f"{E2E}::tusd::TUSD"
     VK = f"{E2E}::vendor_key::E2E"
     PAUSE_GUARDIAN = f"{PERP}::authority::PAUSE_GUARDIAN"
-    check("all 10 packages published", len(P) == 10)
+    check("all 11 packages published", len(P) == len(PACKAGES) + 1)
 
     vendor_config = shared_created(ids["vendor"]["tx"], "::config::Config")
     vendor_pkg_admin = owned_created(ids["vendor"]["tx"], "::authority::AuthorityCap<")
@@ -431,6 +432,13 @@ def main():
         assign="oracle_vk",
     )
     cmds += call(f"{PERP}::registry::set_vendor_registration", [], obj(registry), obj(perp_pkg_admin), "true")
+    # The conditional order package drives sessions through the extension gate.
+    cmds += call(
+        f"{PERP}::registry::authorize_extension",
+        [f"{P['perpetuals_orders']}::extension::ORDERS"],
+        obj(registry),
+        obj(perp_pkg_admin),
+    )
     cmds += call(
         f"{PERP}::registry::register_vendor",
         [VK, ADMIN],

@@ -37,6 +37,8 @@ public struct VendorRegistrationOpenKey has copy, drop, store {}
 
 public struct FrozenVersionKey has copy, drop, store {}
 
+public struct AuthorizedExtensionKey<phantom W> has copy, drop, store {}
+
 // === Functions ===
 
 public(package) fun registry_market_info(ch_id: ID): RegistryMarketInfoKey {
@@ -101,4 +103,8 @@ public(package) fun vendor_registration_open(): VendorRegistrationOpenKey {
 
 public(package) fun frozen_version(): FrozenVersionKey {
     FrozenVersionKey {}
+}
+
+public(package) fun authorized_extension<W>(): AuthorizedExtensionKey<W> {
+    AuthorizedExtensionKey {}
 }

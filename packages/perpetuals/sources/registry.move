@@ -58,6 +58,7 @@ const EVendorAdminCapDoesNotExist: u64 = 5025;
 const ENotFrozen: u64 = 5026;
 const EInvalidResumeVersion: u64 = 5027;
 const ENotOneTimeWitness: u64 = 66;
+const EExtensionNotAuthorized: u64 = 5028;
 
 // === Types ===
 
@@ -872,6 +873,28 @@ public fun apply_config_update<ADMIN_OR_ASSISTANT>(
     config.max_assistants_per_account = max_assistants_per_account
 }
 
+/// Extensions are packages that drive sessions, collateral and order tickets on behalf of
+/// accounts through the `*_as_extension` entry points of `clearing_house` and `account`,
+/// presenting a witness of type `W` that only they can create. The package admin authorizes
+/// each witness type once.
+public fun authorize_extension<W>(registry: &mut Registry, _: &AuthorityCap<PACKAGE, ADMIN>) {
+    registry.assert_package_version();
+    dynamic_field::add(&mut registry.id, keys::authorized_extension<W>(), true)
+}
+
+public fun deauthorize_extension<W>(registry: &mut Registry, _: &AuthorityCap<PACKAGE, ADMIN>) {
+    registry.assert_package_version();
+    let _: bool = dynamic_field::remove(&mut registry.id, keys::authorized_extension<W>());
+}
+
+public fun is_extension_authorized<W>(registry: &Registry): bool {
+    dynamic_field::exists(&registry.id, keys::authorized_extension<W>())
+}
+
+public fun assert_extension_authorized<W>(registry: &Registry) {
+    assert!(registry.is_extension_authorized<W>(), EExtensionNotAuthorized)
+}
+
 public fun register_vendor<VendorKey, ADMIN_OR_ASSISTANT>(
     registry: &mut Registry,
     cap: &AuthorityCap<vendor::authority::VENDOR<VendorKey>, ADMIN_OR_ASSISTANT>,
@@ -1001,7 +1024,7 @@ fun set_integrator_address_(
     events::updated_integrator_address(integrator_id, previous_integrator_address, new_integrator_address)
 }
 
-public(package) fun assert_package_version(registry: &Registry) {
+public fun assert_package_version(registry: &Registry) {
     assert!(registry.version <= 1, EInvalidVersion)
 }
 

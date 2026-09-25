@@ -19,11 +19,15 @@ None of the packages are published yet; every package address is `0x0`.
 | `vendor` | authority, config, events, init, metadata | Registration and metadata of the vendors that operate markets and price feeds | authority_cap |
 | `oracle_aggregator` | authority, config, events, init, price, price_feed, price_feed_storage, source | Price feed storage; newest, median and TWAP prices across sources | vendor, authority_cap |
 | `oracle_pyth` | init, price_feed_storage, source | Adapter that writes Pyth prices into `oracle_aggregator` feeds | the above, Pyth |
-| `perpetuals` | account, adl, authority, clearing_house, events, init, keys, market, orderbook, registry, stop_orders, twap_orders | Clearing house, order book, markets, accounts, stop and TWAP orders, liquidation, ADL | vendor, ifixed, authority_cap, position, oracle_aggregator, ordered_map |
-| `market_making_vault` | authority, config, errors, events, init, interface, keys, metadata, perpetuals_api, vault | LP vaults: deposits, withdrawal requests, trading sessions run by the vault owner | perpetuals and six others |
+| `perpetuals` | account, adl, authority, clearing_house, events, init, keys, market, orderbook, registry | Clearing house, order book, markets, accounts, liquidation, ADL, and the extension gate other packages drive sessions through | vendor, ifixed, authority_cap, position, oracle_aggregator, ordered_map |
+| `perpetuals_orders` | events, extension, stop_orders, twap_orders | Stop loss / take profit, standalone stop and TWAP order tickets, executed through the perpetuals extension gate with the `ORDERS` witness | perpetuals, authority_cap, oracle_aggregator, ifixed |
+| `market_making_vault` | authority, config, errors, events, init, interface, keys, metadata, perpetuals_api, vault | LP vaults: deposits, withdrawal requests, trading sessions run by the vault owner | perpetuals, perpetuals_orders and six others |
 
 Publish order: `ifixed`, `authority_cap`, `ordered_map`, `af_lp`, then `position`, `vendor`, then
-`oracle_aggregator`, then `oracle_pyth`, `perpetuals`, then `market_making_vault`.
+`oracle_aggregator`, then `oracle_pyth`, `perpetuals`, `perpetuals_orders`, then `market_making_vault`.
+After publishing, the perpetuals package admin authorizes the order package's witness with
+`registry::authorize_extension<perpetuals_orders::extension::ORDERS>`; the localnet suite does this
+in its setup.
 
 ## Dependencies
 
@@ -47,10 +51,12 @@ Every package builds without warnings.
 
 ## Package size
 
-The `perpetuals` package sits just under the chain's 100 KiB limit on a published package object
-(`max_move_package_size`, 102,400 bytes). The object carries about 6.7 KB of type origin and
-linkage tables on top of the module bytecode, so the modules must stay below roughly 95.7 KB;
-they are at 94.8 KB. Measure after building:
+The chain limits a published package object to 100 KiB (`max_move_package_size`, 102,400
+bytes), and the object carries about 6.7 KB of type origin and linkage tables on top of the
+module bytecode, so a package's modules must stay below roughly 95 KB. `perpetuals` was at that
+line, which is why the stop and TWAP orders live in `perpetuals_orders` (15.8 KB) and drive the
+clearing house through the extension gate; `perpetuals` is now at 81.1 KB. Measure after
+building:
 
 ```bash
 cd packages/perpetuals && haneul move build --build-env mainnet && \
@@ -58,11 +64,13 @@ cd packages/perpetuals && haneul move build --build-env mainnet && \
 ```
 
 A publish that fails with `MovePackageTooBig` means this budget was exceeded; function names are
-stored in every module that calls them, so long identifiers and duplicated code both count.
+stored in every module that calls them, so long identifiers and duplicated code both count. The
+same gate (`registry::authorize_extension`, the `*_as_extension` entry points of `clearing_house`
+and `account`) is how further features can live in packages of their own.
 
 ## Unit tests
 
-Six packages carry Move unit tests under their `tests/` directories, 255 in total:
+Seven packages carry Move unit tests under their `tests/` directories, 261 in total:
 
 | Package | Tests | What is checked |
 |---|---|---|
@@ -71,7 +79,8 @@ Six packages carry Move unit tests under their `tests/` directories, 255 in tota
 | `position` | 34 | Fills on both sides with their rounding, taker settlement, funding, free collateral, maker fill restoration, margin requirement checks, bankruptcy price |
 | `oracle_pyth` | 14 | Exponent scaling of Pyth prices to 18 decimals, feed creation from a Pyth price object with its millisecond timestamp, the feed's binding to that object, source authorization and versioning, feed administration |
 | `market_making_vault` | 25 | LP pricing on cash and on margin, the withdraw request lifecycle, owner-processed withdrawals with the owner fee and treasury, and forced withdrawals: delay, cash-only, closing the position for a dominant share, the partial-close margin band for a small share, order cancelation, and the force-withdraw pause window |
-| `perpetuals` | 129 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization and ADL (13); pausing, close and settlement, treasury, proposals, freezing (17); stop loss / take profit and standalone stop tickets (23); TWAP tickets (20) |
+| `perpetuals` | 92 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization and ADL (13); pausing, close and settlement, treasury, proposals, freezing, registry configuration and the extension gate (23) |
+| `perpetuals_orders` | 43 | Stop loss / take profit and standalone stop tickets (23); TWAP tickets (20) |
 
 The perpetuals tests run on a `test_scenario` fixture (`tests/test_support.move`) that stands up
 the vendor, oracle and perpetuals packages, a mock price source and one BTC/USD market with the
@@ -141,7 +150,7 @@ See `docs/market-launch.md` for the launch order and the operators a market depe
 ## Status
 
 The packages are not published. Unit tests cover `ifixed`, `ordered_map`, `position`,
-`perpetuals`, `oracle_pyth` and `market_making_vault`; the aggregator, vendor and the small
+`perpetuals`, `perpetuals_orders`, `oracle_pyth` and `market_making_vault`; the aggregator, vendor and the small
 `authority_cap` and `af_lp` packages are only exercised by the localnet suite.
 
 ## License

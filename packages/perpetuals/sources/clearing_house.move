@@ -3140,6 +3140,83 @@ public(package) fun start_session_<T>(
     }
 }
 
+// === Extensions ===
+
+// Packages authorized in the registry (`registry::authorize_extension`) drive sessions and
+// collateral for accounts through these entry points, presenting their witness. Each one
+// checks the witness and then does exactly what the package-private function it wraps does.
+
+public fun start_session_as_extension<T, W: drop>(
+    clearing_house: ClearingHouse<T>,
+    _: &W,
+    registry: &Registry,
+    account_id: u64,
+    base_oracle: &PriceFeedStorage,
+    collateral_oracle: &PriceFeedStorage,
+    uses_priority_gas_price: bool,
+    integrator_info: Option<IntegratorInfo>,
+    clock: &Clock,
+): SessionHotPotato<T> {
+    registry.assert_extension_authorized<W>();
+    start_session_(
+        clearing_house,
+        account_id,
+        base_oracle,
+        collateral_oracle,
+        uses_priority_gas_price,
+        integrator_info,
+        clock,
+    )
+}
+
+public fun end_session_as_extension<T, W: drop>(
+    hot_potato: SessionHotPotato<T>,
+    _: &W,
+    registry: &Registry,
+    account: &mut Account<T>,
+    allocate_missing_margin: bool,
+    deallocate_free_collateral: bool,
+    allow_empty_session: bool,
+): (ClearingHouse<T>, SessionSummary) {
+    registry.assert_extension_authorized<W>();
+    end_session_(hot_potato, account, allocate_missing_margin, deallocate_free_collateral, allow_empty_session)
+}
+
+public fun deallocate_collateral_as_extension<T, W: drop>(
+    clearing_house: &mut ClearingHouse<T>,
+    _: &W,
+    registry: &Registry,
+    account: &mut Account<T>,
+    base_oracle: &PriceFeedStorage,
+    collateral_oracle: &PriceFeedStorage,
+    amount: Option<u64>,
+    clock: &Clock,
+): u64 {
+    registry.assert_extension_authorized<W>();
+    deallocate_collateral_internal(clearing_house, account, base_oracle, collateral_oracle, amount, clock)
+}
+
+/// Samples the TWAPs and settles the funding due at `now`, as a session start does.
+public fun update_fundings_and_twaps_as_extension<T, W: drop>(
+    clearing_house: &mut ClearingHouse<T>,
+    _: &W,
+    registry: &Registry,
+    index_price: u256,
+    book_price: u256,
+    now: u64,
+) {
+    registry.assert_extension_authorized<W>();
+    let ch_id = clearing_house.id.to_inner();
+    market::try_update_fundings_and_twaps(
+        &clearing_house.market_params,
+        &mut clearing_house.market_state,
+        now,
+        index_price,
+        book_price,
+        &ch_id,
+    )
+}
+
 /// Cancels every order in `order_ids`, all of which must exist and belong to `account_id`.
 fun cancel_orders_<T>(
     clearing_house: &mut ClearingHouse<T>,
@@ -3310,7 +3387,7 @@ fun create_clearing_house_<T, VendorKey, ADMIN_OR_ASSISTANT>(
     clearing_house
 }
 
-public(package) fun assert_package_version<T>(clearing_house: &ClearingHouse<T>) {
+public fun assert_package_version<T>(clearing_house: &ClearingHouse<T>) {
     assert!(clearing_house.version <= 1, EInvalidVersion)
 }
 
@@ -3318,7 +3395,7 @@ fun assert_market_is_paused<T>(ch: &ClearingHouse<T>) {
     assert!(is_market_paused(ch), EMarketIsNotPaused)
 }
 
-public(package) fun assert_market_is_not_paused<T>(ch: &ClearingHouse<T>) {
+public fun assert_market_is_not_paused<T>(ch: &ClearingHouse<T>) {
     assert!(ch.paused == 0, EMarketIsPaused)
 }
 

@@ -31,8 +31,8 @@ deps = { Haneul = "Haneul", MoveStdlib = "MoveStdlib" }
 [pinned.mainnet.market_making_vault]
 source = { local = "../../packages/market_making_vault" }
 use_environment = "mainnet"
-manifest_digest = "2C95661F8C3A4A416B6745C6B826E357ECF9E73C95EE6DC71D5F1B6A4F715033"
-deps = { Haneul = "Haneul", MoveStdlib = "MoveStdlib", authority_cap = "authority_cap", ifixed = "ifixed", oracle_aggregator = "oracle_aggregator", ordered_map = "ordered_map", perpetuals = "perpetuals", position = "position", vendor = "vendor" }
+manifest_digest = "9D8F0BAA978871C30542D36366CAA5E9C9DDCAB9EE6495CE063583DA5FCA4D46"
+deps = { Haneul = "Haneul", MoveStdlib = "MoveStdlib", authority_cap = "authority_cap", ifixed = "ifixed", oracle_aggregator = "oracle_aggregator", ordered_map = "ordered_map", perpetuals = "perpetuals", perpetuals_orders = "perpetuals_orders", position = "position", vendor = "vendor" }
 
 [pinned.mainnet.oracle_aggregator]
 source = { local = "../../packages/oracle_aggregator" }
@@ -57,6 +57,12 @@ source = { local = "../../packages/perpetuals" }
 use_environment = "mainnet"
 manifest_digest = "54E8D8EC8CEF23232D995292569F73267A7D73C1D323ACCD8FF2CDDD62A360EA"
 deps = { Haneul = "Haneul", MoveStdlib = "MoveStdlib", authority_cap = "authority_cap", ifixed = "ifixed", oracle_aggregator = "oracle_aggregator", ordered_map = "ordered_map", position = "position", vendor = "vendor" }
+
+[pinned.mainnet.perpetuals_orders]
+source = { local = "../../packages/perpetuals_orders" }
+use_environment = "mainnet"
+manifest_digest = "0C2CA209E1D53014EEEA181B62DEC8F931E3B2943BD42278997609A7AFE9F2DF"
+deps = { Haneul = "Haneul", MoveStdlib = "MoveStdlib", authority_cap = "authority_cap", ifixed = "ifixed", oracle_aggregator = "oracle_aggregator", perpetuals = "perpetuals" }
 
 [pinned.mainnet.position]
 source = { local = "../../packages/position" }

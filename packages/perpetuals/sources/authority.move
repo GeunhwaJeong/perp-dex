@@ -199,7 +199,7 @@ public(package) fun destroy_account_assistant_cap(
     cap.destroy(internal::permit<ACCOUNT>())
 }
 
-public(package) fun assert_is_admin_or_assistant<Role>() {
+public fun assert_is_admin_or_assistant<Role>() {
     let role = type_name::with_defining_ids<Role>();
     let is_admin_or_assistant = role == type_name::with_defining_ids<ASSISTANT>()
         || role == type_name::with_defining_ids<ADMIN>();

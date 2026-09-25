@@ -25,6 +25,7 @@ use oracle_aggregator::price_feed_storage::PriceFeedStorage;
 use perpetuals::account::Account;
 use perpetuals::clearing_house::ClearingHouse;
 use perpetuals::registry::Registry;
+use perpetuals_orders::extension::ORDERS;
 use perpetuals::test_support::{Self as t, Fx};
 use perpetuals::tusd::TUSD;
 
@@ -70,6 +71,7 @@ public fun setup(): (Scenario, Fx, VFx) {
         test_utils::create_one_time_witness<VLP>(), 6, b"VLP", b"Vault LP", b"", option::none(), sc.ctx(),
     );
     let mut perps_registry = sc.take_shared_by_id<Registry>(t::registry_id(&fx));
+    perps_registry.authorize_extension<ORDERS>(t::perp_admin(&fx));
     let mut config = sc.take_shared<Config>();
     let mut coin_reg = sc.take_shared<CoinRegistry>();
     let pfs_tusd = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_tusd_id(&fx));

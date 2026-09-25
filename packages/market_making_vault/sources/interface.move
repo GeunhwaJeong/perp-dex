@@ -24,7 +24,7 @@ use oracle_aggregator::price_feed_storage::PriceFeedStorage;
 use perpetuals::account::{Account, IntegratorInfo};
 use perpetuals::clearing_house::{ClearingHouse, SessionHotPotato, SessionSummary};
 use perpetuals::registry::Registry;
-use perpetuals::twap_orders::TWAPOrderDetails;
+use perpetuals_orders::twap_orders::TWAPOrderDetails;
 use std::ascii::String;
 
 // === Functions ===
@@ -1080,6 +1080,7 @@ public fun create_twap_order_ticket<L, C, ADMIN_OR_ASSISTANT>(
     cap: &AuthorityCap<VAULT<L>, ADMIN_OR_ASSISTANT>,
     account: &mut Account<C>,
     clearing_house: &ClearingHouse<C>,
+    registry: &Registry,
     executors: vector<address>,
     gas: Coin<HANEUL>,
     encrypted_details: vector<u8>,
@@ -1091,6 +1092,7 @@ public fun create_twap_order_ticket<L, C, ADMIN_OR_ASSISTANT>(
         vault,
         account,
         clearing_house,
+        registry,
         executors,
         gas,
         encrypted_details,
@@ -1144,6 +1146,7 @@ public fun admin_cancel_twap_order<L, C, ADMIN_OR_ASSISTANT>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     twap_order_ticket_id: ID,
     ctx: &mut TxContext,
 ): Coin<HANEUL> {
@@ -1156,6 +1159,7 @@ public fun admin_cancel_twap_order<L, C, ADMIN_OR_ASSISTANT>(
         base_oracle,
         collateral_oracle,
         clock,
+        registry,
         twap_order_ticket_id,
         ctx,
     )
@@ -1180,6 +1184,7 @@ public fun place_stop_order_sltp<L, C>(
     salt: vector<u8>,
     integrator_info: Option<IntegratorInfo>,
     clock: &Clock,
+    registry: &Registry,
     ctx: &mut TxContext,
 ): (SessionSummary, Coin<HANEUL>, ClearingHouse<C>) {
     vault.assert_package_version();
@@ -1189,6 +1194,7 @@ public fun place_stop_order_sltp<L, C>(
         base_oracle,
         collateral_oracle,
         clock,
+        registry,
         stop_order_ticket_id,
         account,
         expire_timestamp,
@@ -1226,6 +1232,7 @@ public fun place_stop_order_standalone<L, C>(
     salt: vector<u8>,
     integrator_info: Option<IntegratorInfo>,
     clock: &Clock,
+    registry: &Registry,
     ctx: &mut TxContext,
 ): (SessionSummary, Coin<HANEUL>, ClearingHouse<C>) {
     vault.assert_package_version();
@@ -1235,6 +1242,7 @@ public fun place_stop_order_standalone<L, C>(
         base_oracle,
         collateral_oracle,
         clock,
+        registry,
         stop_order_ticket_id,
         account,
         expire_timestamp,
@@ -1270,6 +1278,7 @@ public fun execute_twap_order<L, C>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     twap_order_ticket_id: ID,
     account: &mut Account<C>,
     new_details: &TWAPOrderDetails,
@@ -1283,6 +1292,7 @@ public fun execute_twap_order<L, C>(
         base_oracle,
         collateral_oracle,
         clock,
+        registry,
         twap_order_ticket_id,
         account,
         new_details,
@@ -1298,6 +1308,7 @@ public fun finalize_twap_order<L, C>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     twap_order_ticket_id: ID,
     new_details: &TWAPOrderDetails,
     ctx: &mut TxContext,
@@ -1310,6 +1321,7 @@ public fun finalize_twap_order<L, C>(
         base_oracle,
         collateral_oracle,
         clock,
+        registry,
         twap_order_ticket_id,
         new_details,
         ctx,
@@ -1323,6 +1335,7 @@ public fun cancel_twap_order<L, C>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     twap_order_ticket_id: ID,
     ctx: &mut TxContext,
 ): Coin<HANEUL> {
@@ -1334,6 +1347,7 @@ public fun cancel_twap_order<L, C>(
         base_oracle,
         collateral_oracle,
         clock,
+        registry,
         twap_order_ticket_id,
         ctx,
     )

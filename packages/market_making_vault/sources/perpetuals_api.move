@@ -12,8 +12,8 @@ use oracle_aggregator::price_feed_storage::PriceFeedStorage;
 use perpetuals::account::{Account, IntegratorInfo};
 use perpetuals::clearing_house::{ClearingHouse, SessionHotPotato, SessionSummary};
 use perpetuals::registry::Registry;
-use perpetuals::stop_orders;
-use perpetuals::twap_orders::{Self, TWAPOrderDetails};
+use perpetuals_orders::stop_orders;
+use perpetuals_orders::twap_orders::{Self, TWAPOrderDetails};
 
 // === Private macros reconstructed from repeated inlined code (not stored on-chain) ===
 
@@ -472,6 +472,7 @@ public(package) fun create_twap_order_ticket<L, C>(
     vault: &Vault<L, C>,
     account: &mut Account<C>,
     clearing_house: &ClearingHouse<C>,
+    registry: &Registry,
     executors: vector<address>,
     gas: Coin<HANEUL>,
     encrypted_details: vector<u8>,
@@ -485,6 +486,7 @@ public(package) fun create_twap_order_ticket<L, C>(
         account,
         vault.account_cap(),
         clearing_house,
+        registry,
         executors,
         option::some(vault.execution_domain()),
         gas,
@@ -539,6 +541,7 @@ public(package) fun execute_twap_order<L, C>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     twap_order_ticket_id: ID,
     account: &mut Account<C>,
     new_details: &TWAPOrderDetails,
@@ -565,6 +568,7 @@ public(package) fun execute_twap_order<L, C>(
         new_details,
         amount,
         clock,
+        registry,
         &executor,
         ctx,
     );
@@ -579,6 +583,7 @@ public(package) fun finalize_twap_order<L, C>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     twap_order_ticket_id: ID,
     new_details: &TWAPOrderDetails,
     ctx: &mut TxContext,
@@ -594,6 +599,7 @@ public(package) fun finalize_twap_order<L, C>(
         base_oracle,
         collateral_oracle,
         clock,
+        registry,
         twap_order_ticket_id,
         new_details,
         &executor,
@@ -613,6 +619,7 @@ public(package) fun cancel_twap_order<L, C>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     twap_order_ticket_id: ID,
     ctx: &mut TxContext,
 ): Coin<HANEUL> {
@@ -628,6 +635,7 @@ public(package) fun cancel_twap_order<L, C>(
         collateral_oracle,
         twap_order_ticket_id,
         clock,
+        registry,
         &executor,
         ctx,
     );
@@ -645,6 +653,7 @@ public(package) fun user_cancel_twap_order<L, C>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     twap_order_ticket_id: ID,
     ctx: &mut TxContext,
 ): Coin<HANEUL> {
@@ -660,6 +669,7 @@ public(package) fun user_cancel_twap_order<L, C>(
         collateral_oracle,
         twap_order_ticket_id,
         clock,
+        registry,
         ctx,
     );
     let account_id = account.account_id();
@@ -675,6 +685,7 @@ public(package) fun place_stop_order_sltp<L, C>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     stop_order_ticket_id: ID,
     account: &mut Account<C>,
     expire_timestamp: Option<u64>,
@@ -706,6 +717,7 @@ public(package) fun place_stop_order_sltp<L, C>(
         base_oracle,
         collateral_oracle,
         clock,
+        registry,
         stop_order_ticket_id,
         account,
         expire_timestamp,
@@ -735,6 +747,7 @@ public(package) fun place_stop_order_standalone<L, C>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     stop_order_ticket_id: ID,
     account: &mut Account<C>,
     expire_timestamp: Option<u64>,
@@ -767,6 +780,7 @@ public(package) fun place_stop_order_standalone<L, C>(
         base_oracle,
         collateral_oracle,
         clock,
+        registry,
         stop_order_ticket_id,
         account,
         expire_timestamp,

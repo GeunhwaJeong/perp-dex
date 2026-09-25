@@ -12,6 +12,11 @@ TWAP bounds, proposal delays, minimum order value range, the insurance reserve f
 oracle tolerance floor, and the pending order and assistant caps. Review them before the first
 market; the defaults are conservative but not tuned for any particular asset.
 
+Authorize the conditional order package once:
+`registry::authorize_extension<perpetuals_orders::extension::ORDERS>` with the package admin cap.
+Stop and TWAP tickets cannot be created or executed until this is done, and
+`deauthorize_extension` switches them off again.
+
 Caps to mint from the package admin cap, each to a separate operator key:
 
 | Cap | Entry point | Used by |
@@ -87,7 +92,7 @@ Liquidations add the insurance fee share of every liquidated notional to it.
 | Liquidator | `liquidate` inside a session | Positions below the maintenance margin |
 | ADL operator | `adl::execute_adl` | Negative-equity positions when socialization is off or exhausted |
 | Stale order sweeper (optional) | `try_cancel_stale_orders` with the maintenance cap | Expired and no-longer-reducing reduce-only orders |
-| Stop and TWAP executors | `stop_orders::place_stop_order_*`, `twap_orders::execute` | Conditional orders are executed by whoever the ticket names |
+| Stop and TWAP executors | `perpetuals_orders::stop_orders::place_stop_order_*`, `perpetuals_orders::twap_orders::execute` | Conditional orders are executed by whoever the ticket names |
 
 Two calculations the operators must get right:
 

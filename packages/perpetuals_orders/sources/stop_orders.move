@@ -1,7 +1,7 @@
 // Copyright (c) Aftermath Technologies, Inc.
 // SPDX-License-Identifier: BUSL-1.1
 
-module perpetuals::stop_orders;
+module perpetuals_orders::stop_orders;
 
 use authority_cap::authority::AuthorityCap;
 use haneul::balance::Balance;
@@ -15,7 +15,8 @@ use oracle_aggregator::price_feed_storage::PriceFeedStorage;
 use perpetuals::account::{Account, IntegratorInfo};
 use perpetuals::authority::{Self, ACCOUNT};
 use perpetuals::clearing_house::{ClearingHouse, Executor, SessionSummary};
-use perpetuals::events;
+use perpetuals_orders::events;
+use perpetuals_orders::extension;
 use perpetuals::market;
 use perpetuals::registry::Registry;
 
@@ -85,7 +86,7 @@ public fun create_stop_order_ticket<T, ADMIN_OR_ASSISTANT>(
         stop_order_type,
         ticket.encrypted_details,
     );
-    account.add_order_ticket(ticket)
+    account.add_order_ticket_as_extension(&extension::witness(), registry, ticket)
 }
 
 public fun cancel<T, ADMIN_OR_ASSISTANT>(
@@ -107,7 +108,7 @@ public fun cancel<T, ADMIN_OR_ASSISTANT>(
         account_id,
         stop_order_type: _,
         encrypted_details: _,
-    } = account.remove_order_ticket(ticket_id);
+    } = account.remove_order_ticket_as_extension(&extension::witness(), registry, ticket_id);
     events::deleted_stop_order_ticket<T>(id.to_inner(), account_id, ctx.sender());
     id.delete();
     coin::from_balance(gas, ctx)
@@ -123,7 +124,7 @@ public fun cancel_stop_order_ticket<T>(
     registry.assert_package_version();
     let executor_address = executor.executor_sender();
     account.assert_order_ticket_exists(ticket_id);
-    let ticket: StopOrderTicket<T> = account.remove_order_ticket(ticket_id);
+    let ticket: StopOrderTicket<T> = account.remove_order_ticket_as_extension(&extension::witness(), registry, ticket_id);
     ticket.assert_valid_ticket_executor(executor);
     let StopOrderTicket {
         id,
@@ -150,7 +151,7 @@ public fun edit_stop_order_ticket_details<T, ADMIN_OR_ASSISTANT>(
     account.assert_authority_cap_is_valid(cap);
     account.assert_order_ticket_exists(ticket_id);
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
-    account.borrow_mut_order_ticket<_, StopOrderTicket<T>>(ticket_id).encrypted_details =
+    account.borrow_mut_order_ticket_as_extension<_, _, StopOrderTicket<T>>(&extension::witness(), registry, ticket_id).encrypted_details =
         encrypted_details;
     events::edited_stop_order_ticket_details<T>(ticket_id, account.account_id(), encrypted_details)
 }
@@ -166,7 +167,7 @@ public fun edit_stop_order_ticket_executors<T, ADMIN_OR_ASSISTANT>(
     account.assert_authority_cap_is_valid(cap);
     account.assert_order_ticket_exists(ticket_id);
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
-    account.borrow_mut_order_ticket<_, StopOrderTicket<T>>(ticket_id).executors =
+    account.borrow_mut_order_ticket_as_extension<_, _, StopOrderTicket<T>>(&extension::witness(), registry, ticket_id).executors =
         executors;
     events::edited_stop_order_ticket_executors<T>(ticket_id, account.account_id(), executors)
 }
@@ -178,6 +179,7 @@ public fun place_stop_order_sltp<T>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     ticket_id: ID,
     account: &mut Account<T>,
     expire_timestamp: Option<u64>,
@@ -198,7 +200,7 @@ public fun place_stop_order_sltp<T>(
     clearing_house.assert_market_is_not_paused();
     assert!(ctx.gas_price() == ctx.reference_gas_price(), EInvalidStopOrderGasPrice);
 
-    let (gas, encrypted_details) = consume_ticket(account, ticket_id, executor, 0);
+    let (gas, encrypted_details) = consume_ticket(account, registry, ticket_id, executor, 0);
     assert_stop_order_trigger_price_type(trigger_price_type);
 
     // The ticket commits to blake2b256(bcs(order details) || salt).
@@ -228,6 +230,7 @@ public fun place_stop_order_sltp<T>(
     );
     let trigger_price = derive_stop_order_trigger_price(
         &mut clearing_house,
+        registry,
         index_price,
         index_twap_price,
         trigger_price_type,
@@ -258,7 +261,7 @@ public fun place_stop_order_sltp<T>(
     let size = requested_size.min(ifixed::to_balance(position_size, 1_000_000_000));
 
     let (summary, clearing_house) = run_stop_order(
-        clearing_house, account, base_oracle, collateral_oracle, clock, integrator_info,
+        clearing_house, account, base_oracle, collateral_oracle, clock, registry, integrator_info,
         !position_is_ask, size, price, is_limit_order, order_type, true, expire_timestamp, false,
     );
     (summary, coin::from_balance(gas, ctx), clearing_house)
@@ -271,6 +274,7 @@ public fun place_stop_order_standalone<T>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     ticket_id: ID,
     account: &mut Account<T>,
     expire_timestamp: Option<u64>,
@@ -292,7 +296,7 @@ public fun place_stop_order_standalone<T>(
     clearing_house.assert_market_is_not_paused();
     assert!(ctx.gas_price() == ctx.reference_gas_price(), EInvalidStopOrderGasPrice);
 
-    let (gas, encrypted_details) = consume_ticket(account, ticket_id, executor, 1);
+    let (gas, encrypted_details) = consume_ticket(account, registry, ticket_id, executor, 1);
     assert_stop_order_trigger_price_type(trigger_price_type);
 
     // The ticket commits to blake2b256(bcs(order details) || salt).
@@ -323,6 +327,7 @@ public fun place_stop_order_standalone<T>(
     );
     let trigger_price = derive_stop_order_trigger_price(
         &mut clearing_house,
+        registry,
         index_price,
         index_twap_price,
         trigger_price_type,
@@ -335,7 +340,7 @@ public fun place_stop_order_standalone<T>(
     );
 
     let (summary, clearing_house) = run_stop_order(
-        clearing_house, account, base_oracle, collateral_oracle, clock, integrator_info,
+        clearing_house, account, base_oracle, collateral_oracle, clock, registry, integrator_info,
         side, size, price, is_limit_order, order_type, reduce_only, expire_timestamp, !reduce_only,
     );
     (summary, coin::from_balance(gas, ctx), clearing_house)
@@ -345,12 +350,13 @@ public fun place_stop_order_standalone<T>(
 /// commitment.
 fun consume_ticket<T>(
     account: &mut Account<T>,
+    registry: &Registry,
     ticket_id: ID,
     executor: &Executor,
     expected_type: u64,
 ): (Balance<HANEUL>, vector<u8>) {
     account.assert_order_ticket_exists(ticket_id);
-    let ticket: StopOrderTicket<T> = account.remove_order_ticket(ticket_id);
+    let ticket: StopOrderTicket<T> = account.remove_order_ticket_as_extension(&extension::witness(), registry, ticket_id);
     ticket.assert_valid_ticket_executor(executor);
     let StopOrderTicket {
         id,
@@ -374,6 +380,7 @@ fun run_stop_order<T>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     integrator_info: Option<IntegratorInfo>,
     side: bool,
     size: u64,
@@ -384,7 +391,9 @@ fun run_stop_order<T>(
     expire_timestamp: Option<u64>,
     allocate_missing_margin: bool,
 ): (SessionSummary, ClearingHouse<T>) {
-    let mut session = clearing_house.start_session_(
+    let mut session = clearing_house.start_session_as_extension(
+        &extension::witness(),
+        registry,
         account.account_id(),
         base_oracle,
         collateral_oracle,
@@ -413,7 +422,7 @@ fun run_stop_order<T>(
         EStopOrderWithoutEconomicActivity,
     );
     let (clearing_house, summary) =
-        session.end_session_(account, allocate_missing_margin, true, false);
+        session.end_session_as_extension(&extension::witness(), registry, account, allocate_missing_margin, true, false);
     (summary, clearing_house)
 }
 
@@ -421,6 +430,7 @@ fun run_stop_order<T>(
 /// 2 = mark price (updates fundings and TWAPs first).
 fun derive_stop_order_trigger_price<T>(
     clearing_house: &mut ClearingHouse<T>,
+    registry: &Registry,
     index_price: u256,
     index_twap_price: u256,
     trigger_price_type: u8,
@@ -434,17 +444,19 @@ fun derive_stop_order_trigger_price<T>(
     if (trigger_price_type == 1) {
         return book_price
     };
-    let ch_id = &object::id(clearing_house);
-    let (market_params, market_state) = clearing_house.borrow_mut_market_objects();
-    market::assert_index_twap_divergence_within_limit(market_params, index_price, index_twap_price);
-    market::try_update_fundings_and_twaps(
-        market_params,
-        market_state,
-        now,
+    market::assert_index_twap_divergence_within_limit(
+        clearing_house.market_params(),
+        index_price,
+        index_twap_price,
+    );
+    clearing_house.update_fundings_and_twaps_as_extension(
+        &extension::witness(),
+        registry,
         index_price,
         book_price,
-        ch_id,
+        now,
     );
+    let (market_params, market_state) = clearing_house.market_objects();
     market::calculate_mark_price(market_state, market_params, index_twap_price, book_price, now)
 }
 

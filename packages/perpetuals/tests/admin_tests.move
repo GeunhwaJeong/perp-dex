@@ -386,3 +386,65 @@ fun a_config_update_is_validated_as_a_whole() {
     ts::return_shared(registry);
     t::finish(sc, fx);
 }
+
+// === Extension gate ===
+
+public struct IMPOSTOR has drop {}
+
+#[test, expected_failure(abort_code = 5028, location = perpetuals::registry)]
+fun an_unauthorized_witness_cannot_start_a_session() {
+    let (mut sc, fx) = t::setup();
+    sc.next_tx(t::admin(&fx));
+    let registry = sc.take_shared_by_id<Registry>(t::registry_id(&fx));
+    let clearing_house = sc.take_shared_by_id<perpetuals::clearing_house::ClearingHouse<TUSD>>(t::ch_id(&fx));
+    let pfs_btc = sc.take_shared_by_id<oracle_aggregator::price_feed_storage::PriceFeedStorage>(t::pfs_btc_id(&fx));
+    let pfs_tusd = sc.take_shared_by_id<oracle_aggregator::price_feed_storage::PriceFeedStorage>(t::pfs_tusd_id(&fx));
+    let hp = clearing_house.start_session_as_extension(
+        &IMPOSTOR {}, &registry, t::account_id(&fx, t::taker()), &pfs_btc, &pfs_tusd, false,
+        option::none(), t::clock(&fx),
+    );
+    let mut account = sc.take_shared_by_id<perpetuals::account::Account<TUSD>>(t::account_obj(&fx, t::taker()));
+    let (clearing_house, _) = hp.end_session_as_extension(&IMPOSTOR {}, &registry, &mut account, false, false, true);
+    ts::return_shared(clearing_house);
+    ts::return_shared(account);
+    ts::return_shared(registry);
+    ts::return_shared(pfs_btc);
+    ts::return_shared(pfs_tusd);
+    t::finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = 5028, location = perpetuals::registry)]
+fun an_unauthorized_witness_cannot_store_tickets() {
+    let (mut sc, fx) = t::setup();
+    sc.next_tx(t::admin(&fx));
+    let registry = sc.take_shared_by_id<Registry>(t::registry_id(&fx));
+    let mut account = sc.take_shared_by_id<perpetuals::account::Account<TUSD>>(t::account_obj(&fx, t::taker()));
+    let ticket = Ticket { id: object::new(sc.ctx()) };
+    account.add_order_ticket_as_extension(&IMPOSTOR {}, &registry, ticket);
+    ts::return_shared(account);
+    ts::return_shared(registry);
+    t::finish(sc, fx);
+}
+
+public struct Ticket has key, store { id: UID }
+
+#[test]
+fun authorized_extensions_are_recorded_and_revocable() {
+    let (mut sc, fx) = t::setup();
+    sc.next_tx(t::admin(&fx));
+    let mut registry = sc.take_shared_by_id<Registry>(t::registry_id(&fx));
+    assert!(!registry.is_extension_authorized<IMPOSTOR>());
+    registry.authorize_extension<IMPOSTOR>(t::perp_admin(&fx));
+    assert!(registry.is_extension_authorized<IMPOSTOR>());
+    let mut account = sc.take_shared_by_id<perpetuals::account::Account<TUSD>>(t::account_obj(&fx, t::taker()));
+    let ticket = Ticket { id: object::new(sc.ctx()) };
+    let id = account.add_order_ticket_as_extension(&IMPOSTOR {}, &registry, ticket);
+    assert!(account.has_order_ticket(id));
+    let Ticket { id: uid } = account.remove_order_ticket_as_extension<_, _, Ticket>(&IMPOSTOR {}, &registry, id);
+    uid.delete();
+    registry.deauthorize_extension<IMPOSTOR>(t::perp_admin(&fx));
+    assert!(!registry.is_extension_authorized<IMPOSTOR>());
+    ts::return_shared(account);
+    ts::return_shared(registry);
+    t::finish(sc, fx);
+}

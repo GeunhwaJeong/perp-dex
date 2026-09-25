@@ -7,7 +7,7 @@
 ///
 /// The default order buys 1 BTC in four chunks of 0.25, one a minute, with 1% of slippage.
 #[test_only]
-module perpetuals::twap_order_tests;
+module perpetuals_orders::twap_order_tests;
 
 use haneul::bcs;
 use haneul::coin::{Self, Coin};
@@ -20,7 +20,8 @@ use perpetuals::clearing_house::{Self as ch, ClearingHouse, SessionSummary};
 use perpetuals::registry::Registry;
 use perpetuals::test_support::{Self as t, with_account, with_ch};
 use perpetuals::tusd::TUSD;
-use perpetuals::twap_orders::{Self, TWAPOrderDetails};
+use perpetuals_orders::twap_orders::{Self, TWAPOrderDetails};
+use perpetuals_orders::orders_test_support as os;
 
 const ASK: bool = true;
 const BID: bool = false;
@@ -80,13 +81,15 @@ fun create_ticket(sc: &mut Scenario, fx: &t::Fx, who: u64, s: &Spec, budget: u64
     sc.next_tx(t::admin(fx));
     let mut account = sc.take_shared_by_id<Account<TUSD>>(t::account_obj(fx, who));
     let clearing_house = sc.take_shared_by_id<ClearingHouse<TUSD>>(t::ch_id(fx));
+    let registry = sc.take_shared_by_id<Registry>(t::registry_id(fx));
     let gas = gas(sc, budget);
     let id = twap_orders::create_twap_order_ticket(
-        &mut account, t::cap(fx, who), &clearing_house, vector[t::admin(fx)], option::none(),
-        gas, commitment(s), sc.ctx(),
+        &mut account, t::cap(fx, who), &clearing_house, &registry, vector[t::admin(fx)],
+        option::none(), gas, commitment(s), sc.ctx(),
     );
     ts::return_shared(account);
     ts::return_shared(clearing_house);
+    ts::return_shared(registry);
     id
 }
 
@@ -98,10 +101,11 @@ fun run(sc: &mut Scenario, fx: &t::Fx, who: u64, ticket: ID, s: &Spec, amount: u
     let mut account = sc.take_shared_by_id<Account<TUSD>>(t::account_obj(fx, who));
     let pfs_btc = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_btc_id(fx));
     let pfs_tusd = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_tusd_id(fx));
+    let registry = sc.take_shared_by_id<Registry>(t::registry_id(fx));
     let d = details(s);
     let (summary, gas, clearing_house) = twap_orders::execute(
         &mut account, clearing_house, &pfs_btc, &pfs_tusd, ticket, &d, amount, t::clock(fx),
-        &executor, sc.ctx(),
+        &registry, &executor, sc.ctx(),
     );
     let paid = gas.value();
     coin::burn_for_testing(gas);
@@ -109,6 +113,7 @@ fun run(sc: &mut Scenario, fx: &t::Fx, who: u64, ticket: ID, s: &Spec, amount: u
     ts::return_shared(account);
     ts::return_shared(pfs_btc);
     ts::return_shared(pfs_tusd);
+    ts::return_shared(registry);
     (summary, paid)
 }
 
@@ -119,9 +124,10 @@ fun finalize(sc: &mut Scenario, fx: &t::Fx, who: u64, ticket: ID, s: &Spec): u64
     let mut account = sc.take_shared_by_id<Account<TUSD>>(t::account_obj(fx, who));
     let pfs_btc = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_btc_id(fx));
     let pfs_tusd = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_tusd_id(fx));
+    let registry = sc.take_shared_by_id<Registry>(t::registry_id(fx));
     let d = details(s);
     let gas = twap_orders::finalize(
-        &mut account, &mut clearing_house, &pfs_btc, &pfs_tusd, t::clock(fx), ticket, &d,
+        &mut account, &mut clearing_house, &pfs_btc, &pfs_tusd, t::clock(fx), &registry, ticket, &d,
         &executor, sc.ctx(),
     );
     let left = gas.value();
@@ -130,6 +136,7 @@ fun finalize(sc: &mut Scenario, fx: &t::Fx, who: u64, ticket: ID, s: &Spec): u64
     ts::return_shared(account);
     ts::return_shared(pfs_btc);
     ts::return_shared(pfs_tusd);
+    ts::return_shared(registry);
     left
 }
 
@@ -138,8 +145,12 @@ fun ticket_state(sc: &mut Scenario, fx: &t::Fx, who: u64, ticket: ID): (u64, u64
     let mut account = sc.take_shared_by_id<Account<TUSD>>(t::account_obj(fx, who));
     let exists = account.has_order_ticket(ticket);
     let (processed, unfilled) = if (exists) {
-        let ticket: &mut perpetuals::twap_orders::TWAPOrderTicket<TUSD> =
-            account.borrow_mut_order_ticket(ticket);
+        let registry = sc.take_shared_by_id<Registry>(t::registry_id(fx));
+        let ticket: &mut perpetuals_orders::twap_orders::TWAPOrderTicket<TUSD> = account
+            .borrow_mut_order_ticket_as_extension(
+                &perpetuals_orders::extension::witness(), &registry, ticket,
+            );
+        ts::return_shared(registry);
         let unfilled = ticket.unfilled_scheduled_amount();
         (if (ticket.is_complete(t::mbtc(1_000))) 1 else 0, unfilled)
     } else {
@@ -158,7 +169,7 @@ fun tick(sc: &mut Scenario, fx: &mut t::Fx, ms: u64) {
 
 #[test]
 fun chunks_execute_one_a_minute_and_pay_gas_pro_rata() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
@@ -182,7 +193,7 @@ fun chunks_execute_one_a_minute_and_pay_gas_pro_rata() {
 
 #[test]
 fun unfilled_amount_is_retried_when_the_executor_asks_for_less() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let mut s = default_spec();
     // Full amount uncertainty lets the executor pass any amount, down to zero.
@@ -203,7 +214,7 @@ fun unfilled_amount_is_retried_when_the_executor_asks_for_less() {
 
 #[test]
 fun a_small_tail_merges_into_the_last_chunk() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     let mut s = default_spec();
     // 1 BTC in three chunks of 0.333 leaves a 0.001 tail; merge tails below 50% of a chunk.
     s.chunks = 3;
@@ -230,7 +241,7 @@ fun a_small_tail_merges_into_the_last_chunk() {
 
 #[test]
 fun the_limit_price_is_the_mark_plus_slippage() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     // Only an ask at 101,500 rests: 1.5% above the 100,000 mark, beyond the 1% slippage.
     perpetuals::test_support::session!(&mut sc, &fx, t::maker(), false, false, |hp| {
         hp.place_limit_order(ASK, t::mbtc(500), t::px(101_500), 0, option::none(), false, option::none());
@@ -251,7 +262,7 @@ fun the_limit_price_is_the_mark_plus_slippage() {
 
 #[test]
 fun a_sell_twap_reduce_only_closes_a_position() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     perpetuals::test_support::session!(&mut sc, &fx, t::taker(), false, false, |hp| {
         hp.place_market_order(BID, t::mbtc(200), false);
@@ -277,9 +288,9 @@ fun a_sell_twap_reduce_only_closes_a_position() {
 
 // === Timing rules ===
 
-#[test, expected_failure(abort_code = 6303, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6303, location = perpetuals_orders::twap_orders)]
 fun chunks_respect_the_execution_gap() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
@@ -292,7 +303,7 @@ fun chunks_respect_the_execution_gap() {
 
 #[test]
 fun chunks_may_run_within_the_gap_uncertainty() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
@@ -302,9 +313,9 @@ fun chunks_may_run_within_the_gap_uncertainty() {
     t::finish(sc, fx);
 }
 
-#[test, expected_failure(abort_code = 6305, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6305, location = perpetuals_orders::twap_orders)]
 fun an_order_spoils_after_the_retry_window() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
@@ -315,9 +326,9 @@ fun an_order_spoils_after_the_retry_window() {
     t::finish(sc, fx);
 }
 
-#[test, expected_failure(abort_code = 6310, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6310, location = perpetuals_orders::twap_orders)]
 fun the_first_run_has_its_own_deadline() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let mut s = default_spec();
     s.first_run_expire = option::some(t::clock(&fx).timestamp_ms() + 1_000);
@@ -327,9 +338,9 @@ fun the_first_run_has_its_own_deadline() {
     t::finish(sc, fx);
 }
 
-#[test, expected_failure(abort_code = 6301, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6301, location = perpetuals_orders::twap_orders)]
 fun an_expired_order_cannot_run() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let mut s = default_spec();
     s.expire = option::some(t::clock(&fx).timestamp_ms() + 1_000);
@@ -341,7 +352,7 @@ fun an_expired_order_cannot_run() {
 
 // === Validation ===
 
-#[test, expected_failure(abort_code = 6300, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6300, location = perpetuals_orders::twap_orders)]
 fun details_need_at_least_one_lot_per_chunk() {
     twap_orders::new_details(
         option::none(), option::none(), MINUTE, 10_000, 5, 0, 30_000, 0, 2_500, BID, 4, 100,
@@ -349,9 +360,9 @@ fun details_need_at_least_one_lot_per_chunk() {
     );
 }
 
-#[test, expected_failure(abort_code = 6300, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6300, location = perpetuals_orders::twap_orders)]
 fun revealed_details_must_match_the_ticket() {
-    let (mut sc, fx) = t::setup();
+    let (mut sc, fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
@@ -361,9 +372,9 @@ fun revealed_details_must_match_the_ticket() {
     t::finish(sc, fx);
 }
 
-#[test, expected_failure(abort_code = 6302, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6302, location = perpetuals_orders::twap_orders)]
 fun the_amount_must_be_within_the_uncertainty_of_a_chunk() {
-    let (mut sc, fx) = t::setup();
+    let (mut sc, fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
@@ -371,9 +382,9 @@ fun the_amount_must_be_within_the_uncertainty_of_a_chunk() {
     t::finish(sc, fx);
 }
 
-#[test, expected_failure(abort_code = 6312, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6312, location = perpetuals_orders::twap_orders)]
 fun the_size_must_be_lot_compatible() {
-    let (mut sc, fx) = t::setup();
+    let (mut sc, fx) = os::setup();
     let mut s = default_spec();
     s.size = t::mbtc(1_000) + 1;
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
@@ -381,9 +392,9 @@ fun the_size_must_be_lot_compatible() {
     t::finish(sc, fx);
 }
 
-#[test, expected_failure(abort_code = 6306, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6306, location = perpetuals_orders::twap_orders)]
 fun only_listed_executors_may_run() {
-    let (mut sc, fx) = t::setup();
+    let (mut sc, fx) = os::setup();
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
     sc.next_tx(@0xBEEF);
@@ -392,11 +403,13 @@ fun only_listed_executors_may_run() {
     let mut account = sc.take_shared_by_id<Account<TUSD>>(t::account_obj(&fx, t::taker()));
     let pfs_btc = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_btc_id(&fx));
     let pfs_tusd = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_tusd_id(&fx));
+    let registry = sc.take_shared_by_id<Registry>(t::registry_id(&fx));
     let d = details(&s);
     let (_, gas, clearing_house) = twap_orders::execute(
         &mut account, clearing_house, &pfs_btc, &pfs_tusd, ticket, &d, t::mbtc(250), t::clock(&fx),
-        &executor, sc.ctx(),
+        &registry, &executor, sc.ctx(),
     );
+    ts::return_shared(registry);
     coin::burn_for_testing(gas);
     ts::return_shared(clearing_house);
     ts::return_shared(account);
@@ -409,7 +422,7 @@ fun only_listed_executors_may_run() {
 
 #[test]
 fun finalize_pays_the_rest_of_the_gas_and_frees_collateral() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     let mut s = default_spec();
     s.chunks = 2;
     s.max_execution_bps = 5_000;
@@ -435,9 +448,9 @@ fun finalize_pays_the_rest_of_the_gas_and_frees_collateral() {
     t::finish(sc, fx);
 }
 
-#[test, expected_failure(abort_code = 6308, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6308, location = perpetuals_orders::twap_orders)]
 fun finalize_needs_a_completed_order() {
-    let (mut sc, fx) = t::setup();
+    let (mut sc, fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
@@ -448,7 +461,7 @@ fun finalize_needs_a_completed_order() {
 
 #[test]
 fun cancel_returns_the_unpaid_gas() {
-    let (mut sc, mut fx) = t::setup();
+    let (mut sc, mut fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
@@ -460,10 +473,12 @@ fun cancel_returns_the_unpaid_gas() {
     let mut account = sc.take_shared_by_id<Account<TUSD>>(t::account_obj(&fx, t::taker()));
     let pfs_btc = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_btc_id(&fx));
     let pfs_tusd = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_tusd_id(&fx));
+    let registry = sc.take_shared_by_id<Registry>(t::registry_id(&fx));
     let gas = twap_orders::user_cancel_twap_order(
         &mut account, t::cap(&fx, t::taker()), &mut clearing_house, &pfs_btc, &pfs_tusd, ticket,
-        t::clock(&fx), sc.ctx(),
+        t::clock(&fx), &registry, sc.ctx(),
     );
+    ts::return_shared(registry);
     assert!(gas.value() == BUDGET * 3 / 4 && !account.has_order_ticket(ticket));
     coin::burn_for_testing(gas);
     ts::return_shared(clearing_house);
@@ -478,10 +493,12 @@ fun cancel_returns_the_unpaid_gas() {
     let mut account = sc.take_shared_by_id<Account<TUSD>>(t::account_obj(&fx, t::taker()));
     let pfs_btc = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_btc_id(&fx));
     let pfs_tusd = sc.take_shared_by_id<PriceFeedStorage>(t::pfs_tusd_id(&fx));
+    let registry = sc.take_shared_by_id<Registry>(t::registry_id(&fx));
     let gas = twap_orders::cancel(
-        &mut account, &mut clearing_house, &pfs_btc, &pfs_tusd, ticket, t::clock(&fx), &executor,
-        sc.ctx(),
+        &mut account, &mut clearing_house, &pfs_btc, &pfs_tusd, ticket, t::clock(&fx), &registry,
+        &executor, sc.ctx(),
     );
+    ts::return_shared(registry);
     assert!(gas.value() == BUDGET);
     coin::burn_for_testing(gas);
     ts::return_shared(clearing_house);
@@ -491,9 +508,9 @@ fun cancel_returns_the_unpaid_gas() {
     t::finish(sc, fx);
 }
 
-#[test, expected_failure(abort_code = 6307, location = perpetuals::twap_orders)]
+#[test, expected_failure(abort_code = 6307, location = perpetuals_orders::twap_orders)]
 fun a_started_order_cannot_be_edited() {
-    let (mut sc, fx) = t::setup();
+    let (mut sc, fx) = os::setup();
     t::ladder(&mut sc, &fx, 100_000);
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
@@ -509,7 +526,7 @@ fun a_started_order_cannot_be_edited() {
 
 #[test]
 fun an_unstarted_order_can_be_edited() {
-    let (mut sc, fx) = t::setup();
+    let (mut sc, fx) = os::setup();
     let s = default_spec();
     let ticket = create_ticket(&mut sc, &fx, t::taker(), &s, BUDGET);
     sc.next_tx(t::admin(&fx));

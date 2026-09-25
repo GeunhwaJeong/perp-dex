@@ -1,7 +1,7 @@
 // Copyright (c) Aftermath Technologies, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-module perpetuals::twap_orders;
+module perpetuals_orders::twap_orders;
 
 use authority_cap::authority::AuthorityCap;
 use haneul::balance::{Self, Balance};
@@ -14,7 +14,8 @@ use oracle_aggregator::price_feed_storage::PriceFeedStorage;
 use perpetuals::account::{Account, IntegratorInfo};
 use perpetuals::authority::{Self, ACCOUNT};
 use perpetuals::clearing_house::{ClearingHouse, Executor, SessionSummary};
-use perpetuals::events;
+use perpetuals_orders::events;
+use perpetuals_orders::extension;
 use perpetuals::registry::Registry;
 use std::bcs;
 
@@ -122,6 +123,7 @@ public fun create_twap_order_ticket<T, ADMIN_OR_ASSISTANT>(
     account: &mut Account<T>,
     cap: &AuthorityCap<ACCOUNT, ADMIN_OR_ASSISTANT>,
     clearing_house: &ClearingHouse<T>,
+    registry: &Registry,
     executors: vector<address>,
     execution_domain: Option<address>,
     gas: Coin<HANEUL>,
@@ -160,7 +162,7 @@ public fun create_twap_order_ticket<T, ADMIN_OR_ASSISTANT>(
         gas_amount,
         ticket.encrypted_details,
     );
-    account.add_order_ticket(ticket)
+    account.add_order_ticket_as_extension(&extension::witness(), registry, ticket)
 }
 
 public fun cancel<T>(
@@ -170,15 +172,16 @@ public fun cancel<T>(
     collateral_oracle: &PriceFeedStorage,
     twap_order_ticket_id: ID,
     clock: &Clock,
+    registry: &Registry,
     executor: &Executor,
     ctx: &mut TxContext,
 ): Coin<HANEUL> {
     clearing_house.assert_package_version();
     account.assert_order_ticket_exists(twap_order_ticket_id);
-    let ticket: TWAPOrderTicket<T> = account.remove_order_ticket(twap_order_ticket_id);
+    let ticket: TWAPOrderTicket<T> = account.remove_order_ticket_as_extension(&extension::witness(), registry, twap_order_ticket_id);
     ticket.assert_valid_ticket_executor(executor);
     cancel_ticket(
-        account, clearing_house, base_oracle, collateral_oracle, ticket, clock,
+        account, clearing_house, base_oracle, collateral_oracle, ticket, clock, registry,
         executor.executor_sender(), ctx,
     )
 }
@@ -191,14 +194,16 @@ public fun user_cancel_twap_order<T, Role>(
     collateral_oracle: &PriceFeedStorage,
     twap_order_ticket_id: ID,
     clock: &Clock,
+    registry: &Registry,
     ctx: &mut TxContext,
 ): Coin<HANEUL> {
     clearing_house.assert_package_version();
     account.assert_authority_cap_is_valid(cap);
     account.assert_order_ticket_exists(twap_order_ticket_id);
-    let ticket: TWAPOrderTicket<T> = account.remove_order_ticket(twap_order_ticket_id);
+    let ticket: TWAPOrderTicket<T> = account.remove_order_ticket_as_extension(&extension::witness(), registry, twap_order_ticket_id);
     cancel_ticket(
-        account, clearing_house, base_oracle, collateral_oracle, ticket, clock, ctx.sender(), ctx,
+        account, clearing_house, base_oracle, collateral_oracle, ticket, clock, registry,
+        ctx.sender(), ctx,
     )
 }
 
@@ -211,6 +216,7 @@ fun cancel_ticket<T>(
     collateral_oracle: &PriceFeedStorage,
     ticket: TWAPOrderTicket<T>,
     clock: &Clock,
+    registry: &Registry,
     by: address,
     ctx: &mut TxContext,
 ): Coin<HANEUL> {
@@ -218,7 +224,9 @@ fun cancel_ticket<T>(
     let deallocated_collateral = if (
         ticket.processed_amount != 0 && !clearing_house.is_market_paused()
     ) {
-        clearing_house.deallocate_collateral_internal(
+        clearing_house.deallocate_collateral_as_extension(
+            &extension::witness(),
+            registry,
             account,
             base_oracle,
             collateral_oracle,
@@ -262,6 +270,7 @@ public fun finalize<T>(
     base_oracle: &PriceFeedStorage,
     collateral_oracle: &PriceFeedStorage,
     clock: &Clock,
+    registry: &Registry,
     twap_order_ticket_id: ID,
     new_details: &TWAPOrderDetails,
     executor: &Executor,
@@ -269,7 +278,7 @@ public fun finalize<T>(
 ): Coin<HANEUL> {
     clearing_house.assert_package_version();
     account.assert_order_ticket_exists(twap_order_ticket_id);
-    let ticket: TWAPOrderTicket<T> = account.remove_order_ticket(twap_order_ticket_id);
+    let ticket: TWAPOrderTicket<T> = account.remove_order_ticket_as_extension(&extension::witness(), registry, twap_order_ticket_id);
     let executor_address = executor.executor_sender();
     ticket.assert_valid_ticket_executor(executor);
     ticket.assert_valid_ticket_clearing_house(object::id(clearing_house));
@@ -278,7 +287,9 @@ public fun finalize<T>(
 
     let deallocated_collateral;
     if (!clearing_house.is_market_paused()) {
-        deallocated_collateral = clearing_house.deallocate_collateral_internal(
+        deallocated_collateral = clearing_house.deallocate_collateral_as_extension(
+            &extension::witness(),
+            registry,
             account,
             base_oracle,
             collateral_oracle,
@@ -360,6 +371,7 @@ public fun execute<T>(
     new_details: &TWAPOrderDetails,
     amount: u64,
     clock: &Clock,
+    registry: &Registry,
     executor: &Executor,
     ctx: &mut TxContext
 ): (SessionSummary, Coin<HANEUL>, ClearingHouse<T>) {
@@ -368,7 +380,7 @@ public fun execute<T>(
     assert!(ctx.gas_price() == ctx.reference_gas_price(), EInvalidTwapOrderGasPrice);
 
     account.assert_order_ticket_exists(twap_order_ticket_id);
-    let mut ticket: TWAPOrderTicket<T> = account.remove_order_ticket(twap_order_ticket_id);
+    let mut ticket: TWAPOrderTicket<T> = account.remove_order_ticket_as_extension(&extension::witness(), registry, twap_order_ticket_id);
     ticket.assert_valid_ticket_executor(executor);
     ticket.assert_valid_ticket_clearing_house(object::id(&clearing_house));
     let lot_size = clearing_house.market_params().lot_size();
@@ -420,7 +432,9 @@ public fun execute<T>(
         (amount, execution_amount)
     };
 
-    let mut session = clearing_house.start_session_(
+    let mut session = clearing_house.start_session_as_extension(
+        &extension::witness(),
+        registry,
         account.account_id(),
         base_oracle,
         collateral_oracle,
@@ -473,7 +487,9 @@ public fun execute<T>(
     );
     let summary = session.summary();
     let has_fills = summary.base_filled_bid() != 0 || summary.base_filled_ask() != 0;
-    let (clearing_house, summary) = session.end_session_(
+    let (clearing_house, summary) = session.end_session_as_extension(
+        &extension::witness(),
+        registry,
         account,
         !new_details.reduce_only && has_fills,
         false,
@@ -526,7 +542,7 @@ public fun execute<T>(
             ctx,
         )
     };
-    let _ = account.add_order_ticket(ticket);
+    let _ = account.add_order_ticket_as_extension(&extension::witness(), registry, ticket);
     (summary, gas_payment, clearing_house)
 }
 
@@ -541,7 +557,8 @@ public fun set_details<T, ADMIN_OR_ASSISTANT>(
     account.assert_authority_cap_is_valid(cap);
     account.assert_order_ticket_exists(twap_order_ticket_id);
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
-    let ticket: &mut TWAPOrderTicket<T> = account.borrow_mut_order_ticket(twap_order_ticket_id);
+    let ticket: &mut TWAPOrderTicket<T> =
+        account.borrow_mut_order_ticket_as_extension(&extension::witness(), registry, twap_order_ticket_id);
     assert!(!ticket.has_attempts(), ETwapOrderCannotEditActiveOrder);
     ticket.encrypted_details = encrypted_details;
     events::edited_twap_order_ticket_details<T>(ticket.id.to_inner(), ticket.account_id, encrypted_details)
@@ -558,7 +575,8 @@ public fun set_executors<T, ADMIN_OR_ASSISTANT>(
     account.assert_authority_cap_is_valid(cap);
     account.assert_order_ticket_exists(twap_order_ticket_id);
     authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
-    let ticket: &mut TWAPOrderTicket<T> = account.borrow_mut_order_ticket(twap_order_ticket_id);
+    let ticket: &mut TWAPOrderTicket<T> =
+        account.borrow_mut_order_ticket_as_extension(&extension::witness(), registry, twap_order_ticket_id);
     assert!(!ticket.has_attempts(), ETwapOrderCannotEditActiveOrder);
     ticket.executors = executors;
     events::edited_twap_order_ticket_executors<T>(ticket.id.to_inner(), ticket.account_id, executors)

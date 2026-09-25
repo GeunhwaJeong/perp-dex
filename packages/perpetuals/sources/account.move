@@ -288,6 +288,41 @@ public fun remove_integrator_config<T>(
     );
 }
 
+// === Extensions ===
+
+// Order tickets are objects an authorized extension (see `registry::authorize_extension`)
+// keeps on the account; the extension presents its witness to store, take and edit them.
+
+public fun add_order_ticket_as_extension<T, W: drop, Ticket: key + store>(
+    account: &mut Account<T>,
+    _: &W,
+    registry: &Registry,
+    ticket: Ticket,
+): ID {
+    registry.assert_extension_authorized<W>();
+    add_order_ticket(account, ticket)
+}
+
+public fun remove_order_ticket_as_extension<T, W: drop, Ticket: key + store>(
+    account: &mut Account<T>,
+    _: &W,
+    registry: &Registry,
+    ticket_id: ID,
+): Ticket {
+    registry.assert_extension_authorized<W>();
+    remove_order_ticket(account, ticket_id)
+}
+
+public fun borrow_mut_order_ticket_as_extension<T, W: drop, Ticket: key + store>(
+    account: &mut Account<T>,
+    _: &W,
+    registry: &Registry,
+    ticket_id: ID,
+): &mut Ticket {
+    registry.assert_extension_authorized<W>();
+    borrow_mut_order_ticket(account, ticket_id)
+}
+
 fun revoke_assistant_account_cap_<T>(
     account: &mut Account<T>,
     assistant_cap_id: ID,
@@ -298,7 +333,7 @@ fun revoke_assistant_account_cap_<T>(
 
 /// A cap is valid if it was minted for this account and is either the admin cap or one of the
 /// account's currently active assistant caps.
-public(package) fun assert_authority_cap_is_valid<T, Role>(
+public fun assert_authority_cap_is_valid<T, Role>(
     account: &Account<T>,
     cap: &AuthorityCap<ACCOUNT, Role>,
 ) {
@@ -310,7 +345,7 @@ public(package) fun assert_authority_cap_is_valid<T, Role>(
     assert!(is_valid, EInvalidAccountCap)
 }
 
-public(package) fun assert_order_ticket_exists<T>(account: &Account<T>, ticket_id: ID) {
+public fun assert_order_ticket_exists<T>(account: &Account<T>, ticket_id: ID) {
     assert!(account.has_order_ticket(ticket_id), EOrderInvalidAccount)
 }
 
