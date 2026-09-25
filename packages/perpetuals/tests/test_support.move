@@ -190,7 +190,9 @@ public fun setup(): (Scenario, Fx) {
         orderbook, &perp_vk, &mut registry, &coin_metadata, &clock, &pfs_btc, &pfs_tusd,
         source_id, source_id, IMR, MMR,
         60_000, 21_600_000, 1_000, 60_000, 1_000, 60_000,
-        MAKER_FEE, TAKER_FEE, LIQ_FEE, IF_FEE, LOT, TICK, sc.ctx(),
+        MAKER_FEE, TAKER_FEE, LIQ_FEE, IF_FEE, LOT, TICK,
+        // No socialization: bad debt beyond the insurance fund is left to ADL.
+        0, 0, option::some(1_000_000_000_000_000), sc.ctx(),
     );
     ch::register_market<VK, ADMIN, TUSD>(&mut registry, &perp_vk, &clearing_house);
     let ch_id = object::id(&clearing_house);

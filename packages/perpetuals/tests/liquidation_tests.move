@@ -130,11 +130,11 @@ fun liquidation_must_cancel_the_liqees_orders() {
 // === Bad debt ===
 
 #[test, expected_failure(abort_code = 22, location = perpetuals::clearing_house)]
-fun bad_debt_without_insurance_or_socialization_aborts() {
+fun bad_debt_beyond_the_socialization_limit_aborts() {
     let (mut sc, mut fx) = t::setup();
     open_levered_long(&mut sc, &fx);
     // At 80,000 the position is 18,095 under water; the insurance fund is empty and the
-    // market's max_bad_debt is still its default of zero.
+    // fixture's market declares no socialization (max_bad_debt 0), so only ADL can close it.
     move_price(&mut sc, &mut fx, 80_000);
     liquidate(&mut sc, &fx);
     t::finish(sc, fx);

@@ -66,6 +66,11 @@ LIQ_FEE = 10**16  # 1%
 IF_FEE = 5 * 10**15  # 0.5%
 LOT = 1_000_000  # 0.001 BTC
 TICK = B9  # $1
+# Bad debt policy: no socialization (bad debt beyond the insurance fund is left to ADL), and the
+# default 0.1% priority taker fee.
+MAX_BAD_DEBT = 0
+MAX_SOCIALIZE_MR_DECREASE = 0
+PRIORITY_TAKER_FEE = 10**15
 
 ASK, BID = True, False
 GTC, FOK, POST_ONLY, IOC = 0, 1, 2, 3
@@ -535,6 +540,9 @@ def main():
             u256(IF_FEE),
             u64(LOT),
             u64(TICK),
+            u256(MAX_BAD_DEBT),
+            u256(MAX_SOCIALIZE_MR_DECREASE),
+            f"some({u256(PRIORITY_TAKER_FEE)})",
             assign="ch",
         )
         cmds += call(f"{PERP}::clearing_house::register_market", [VK, ADMIN, TUSD], obj(registry), obj(perp_vk), "ch")

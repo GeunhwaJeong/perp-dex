@@ -1,0 +1,90 @@
+# Market launch runbook
+
+What has to happen, in order, before a clearing house takes its first order, and what has to be
+running afterwards. Every step names the Move entry point; the localnet suite
+(`e2e/localnet_e2e.py`) performs the same steps and is the reference for the exact arguments.
+
+## 1. Package configuration (once per deployment)
+
+`registry::set_config` holds the bounds every market is validated against: fee caps, funding and
+TWAP bounds, proposal delays, minimum order value range, the insurance reserve fraction, the
+oracle tolerance floor, and the pending order and assistant caps. Review them before the first
+market; the defaults are conservative but not tuned for any particular asset.
+
+Caps to mint from the package admin cap, each to a separate operator key:
+
+| Cap | Entry point | Used by |
+|---|---|---|
+| ADL | `registry::create_package_adl_cap` | The ADL operator (`adl::execute_adl`) |
+| Pause guardian | `registry::create_package_pause_guardian_cap` | Emergency pause of any market |
+| Freeze guardian | `registry::create_package_freeze_guardian_cap` | Freezing the registry or a market |
+| Revoke vendor guardian | `registry::create_package_revoke_vendor_guardian_cap` | Revoking a vendor's caps |
+
+## 2. Vendor registration
+
+The vendor key is a type in a package the vendor controls. Register it with the vendor package
+(`vendor::config::register_vendor`), create its metadata, approve the oracle and perpetuals
+domains on that metadata, then register with `oracle_aggregator::config::register_vendor` and
+`perpetuals::registry::register_vendor`. From the perpetuals vendor admin cap mint the treasury,
+pause guardian and maintenance caps (`registry::create_vendor_*_cap`).
+
+## 3. Oracle feeds
+
+Create one `PriceFeedStorage` per priced asset (`price_feed_storage::new`) and add the Pyth feed
+to each through `oracle_pyth::price_feed_storage::new_price_feed`. The market needs one storage
+for the base asset and one for the collateral, both with the source id it will be created with.
+A price pusher must keep the feeds fresher than the market's oracle tolerance (10 s for the base
+feed and 30 s for the collateral by default) or every session aborts with `EBadIndexPrice`.
+
+## 4. Market creation
+
+`clearing_house::create_orderbook` then `clearing_house::create_clearing_house` (or
+`create_clearing_house_with_currency`), `register_market`, `share`.
+
+Parameters that decide how the market behaves under stress, all passed at creation:
+
+- **`max_bad_debt` and `max_socialize_losses_mr_decrease`.** When a liquidation leaves bad debt
+  that the insurance fund cannot cover, the rest is socialized to the other side of the market
+  through its cumulative funding rate, bounded by these two values (USD per liquidation, and
+  the margin ratio drop it may cause). With both at zero, socialization is off: such a
+  liquidation aborts and the position must be closed by the ADL operator. **A market created
+  with zeros needs a running ADL operator; a market with no ADL operator needs non-zero limits
+  and a funded insurance fund.**
+- **`priority_taker_fee`.** The extra taker fee for sessions paying above the reference gas
+  price, or `none` to refuse them.
+- **Margin ratios, fees, lot and tick size.** Changing margin ratios later takes a one to three
+  day proposal (`create_margin_ratios_proposal`, `commit_margin_ratios_proposal`); the rest is
+  immediate through `set_fee_params` and `set_core_params`.
+
+Not passed at creation and worth setting explicitly right after with `set_risk_limit_params`:
+`max_open_interest` (unbounded by default), `max_open_interest_threshold` and
+`max_open_interest_position_percent` (20% above the threshold), `min_order_usd_value` (the
+registry's floor), `max_pending_orders` (the registry's cap), `max_book_index_spread` and
+`max_index_twap_divergence` (5%).
+
+## 5. Insurance fund
+
+Seed it with `clearing_house::donate_to_insurance_fund` before opening. Withdrawals keep a
+reserve of `insurance_open_interest_fraction` times the open interest notional (5% by default).
+Liquidations add the insurance fee share of every liquidated notional to it.
+
+## 6. Off-chain operators that must be running
+
+| Operator | Calls | Why |
+|---|---|---|
+| Price pusher | `oracle_pyth::price_feed_storage::update_price_feed` | Freshness within the tolerance |
+| Funding cranker | `clearing_house::update_funding` | Funding and premium TWAPs only advance when something touches the market |
+| Liquidator | `liquidate` inside a session | Positions below the maintenance margin |
+| ADL operator | `adl::execute_adl` | Negative-equity positions when socialization is off or exhausted |
+| Stale order sweeper (optional) | `try_cancel_stale_orders` with the maintenance cap | Expired and no-longer-reducing reduce-only orders |
+| Stop and TWAP executors | `stop_orders::place_stop_order_*`, `twap_orders::execute` | Conditional orders are executed by whoever the ticket names |
+
+## 7. Opening checklist
+
+- Both feeds fresh, TWAP window set (`set_twap_period_ms`).
+- `set_risk_limit_params` applied; `max_open_interest` set.
+- Insurance fund seeded.
+- Bad debt policy decided and consistent with the operators running (step 4).
+- Pause and freeze guardian keys reachable by someone on call.
+- Accounts opt into leverage explicitly (`set_position_initial_margin_ratio`); new positions
+  start at 1.0.

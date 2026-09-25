@@ -578,6 +578,9 @@ public fun create_orderbook<VendorKey, ADMIN_OR_ASSISTANT>(
     )
 }
 
+/// Creates a market. Every risk parameter that has no safe default is passed here: see
+/// `market::create_market_params` for the bad debt policy (`max_bad_debt`,
+/// `max_socialize_losses_mr_decrease`) and the priority taker fee.
 public fun create_clearing_house<T, VendorKey, ADMIN_OR_ASSISTANT>(
     orderbook: Orderbook,
     cap: &AuthorityCap<VENDOR<VendorKey>, ADMIN_OR_ASSISTANT>,
@@ -602,6 +605,9 @@ public fun create_clearing_house<T, VendorKey, ADMIN_OR_ASSISTANT>(
     insurance_fund_fee: u256,
     lot_size: u64,
     tick_size: u64,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+    priority_taker_fee: Option<u256>,
     ctx: &mut TxContext,
 ): ClearingHouse<T> {
     create_clearing_house_(
@@ -628,6 +634,9 @@ public fun create_clearing_house<T, VendorKey, ADMIN_OR_ASSISTANT>(
         insurance_fund_fee,
         lot_size,
         tick_size,
+        max_bad_debt,
+        max_socialize_losses_mr_decrease,
+        priority_taker_fee,
         ctx,
     )
 }
@@ -656,6 +665,9 @@ public fun create_clearing_house_with_currency<T, VendorKey, ADMIN_OR_ASSISTANT>
     insurance_fund_fee: u256,
     lot_size: u64,
     tick_size: u64,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+    priority_taker_fee: Option<u256>,
     ctx: &mut TxContext,
 ): ClearingHouse<T> {
     create_clearing_house_(
@@ -682,6 +694,9 @@ public fun create_clearing_house_with_currency<T, VendorKey, ADMIN_OR_ASSISTANT>
         insurance_fund_fee,
         lot_size,
         tick_size,
+        max_bad_debt,
+        max_socialize_losses_mr_decrease,
+        priority_taker_fee,
         ctx,
     )
 }
@@ -3414,6 +3429,9 @@ fun create_clearing_house_<T, VendorKey, ADMIN_OR_ASSISTANT>(
     insurance_fund_fee: u256,
     lot_size: u64,
     tick_size: u64,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+    priority_taker_fee: Option<u256>,
     ctx: &mut TxContext,
 ): ClearingHouse<T> {
     registry.assert_package_version();
@@ -3447,6 +3465,9 @@ fun create_clearing_house_<T, VendorKey, ADMIN_OR_ASSISTANT>(
         insurance_fund_fee,
         lot_size,
         tick_size,
+        max_bad_debt,
+        max_socialize_losses_mr_decrease,
+        priority_taker_fee,
         (ifixed::decimal_scalar_from_decimals(decimals) as u256),
     );
     let id = object::new(ctx);
@@ -3483,6 +3504,9 @@ fun create_clearing_house_<T, VendorKey, ADMIN_OR_ASSISTANT>(
         insurance_fund_fee,
         lot_size,
         tick_size,
+        max_bad_debt,
+        max_socialize_losses_mr_decrease,
+        priority_taker_fee,
     );
     let vendor_clearing_houses: &mut vector<ID> = df::borrow_mut(
         registry.borrow_mut_id(),

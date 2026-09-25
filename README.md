@@ -107,6 +107,12 @@ orders, and the vault's forced-withdrawal path.
 
 ## Operational notes
 
+See `docs/market-launch.md` for the launch order and the operators a market depends on.
+
+- `create_clearing_house` takes the bad debt policy explicitly: `max_bad_debt` and
+  `max_socialize_losses_mr_decrease` bound what a liquidation may socialize once the insurance
+  fund is exhausted. Zeros turn socialization off, which makes an ADL operator mandatory for
+  that market.
 - A new position starts with an initial margin ratio of 1.0, i.e. no leverage. Set the leverage with
   `clearing_house::set_position_initial_margin_ratio`, at or above the market's ratio.
 - A vault's LP coin must have the same decimals as its collateral, and the owner's locked

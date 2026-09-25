@@ -139,6 +139,9 @@ public(package) fun create_market_objects(
     insurance_fund_fee: u256,
     lot_size: u64,
     tick_size: u64,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+    priority_taker_fee: Option<u256>,
     scaling_factor: u256,
 ): (MarketParams, MarketState) {
     assert_margin_ratios(margin_ratio_initial, margin_ratio_maintenance);
@@ -151,8 +154,8 @@ public(package) fun create_market_objects(
     );
     assert_spread_twap_parameters(registry_config, spread_twap_frequency_ms, spread_twap_period_ms);
     assert_market_fees(registry_config, maker_fee, taker_fee);
-    // Default priority taker fee: 0.1%.
-    assert_priority_taker_fee(registry_config, option::some(1_000_000_000_000_000));
+    assert_priority_taker_fee(registry_config, priority_taker_fee);
+    assert_bad_debt_limits(max_bad_debt, max_socialize_losses_mr_decrease);
     assert_liquidation_fees(registry_config, liquidation_fee, insurance_fund_fee);
     assert_liquidation_fees_against_mmr(
         margin_ratio_maintenance,
@@ -181,6 +184,9 @@ public(package) fun create_market_objects(
         insurance_fund_fee,
         lot_size,
         tick_size,
+        max_bad_debt,
+        max_socialize_losses_mr_decrease,
+        priority_taker_fee,
         scaling_factor,
     );
     let state = create_market_state(clock.timestamp_ms());
@@ -515,12 +521,7 @@ public(package) fun set_risk_limit_params(
         ifixed::greater_than(max_open_interest_threshold, 0),
         EInvalidMaxOpenInterestPositionThreshold,
     );
-    assert!(ifixed::greater_than_eq(max_bad_debt, 0), EInvalidMaxBadDebt);
-    assert!(
-        ifixed::greater_than_eq(max_socialize_losses_mr_decrease, 0)
-            && ifixed::less_than_eq(max_socialize_losses_mr_decrease, 1_000_000_000_000_000_000),
-        EInvalidMaxSocializeLossesMrDecrease,
-    );
+    assert_bad_debt_limits(max_bad_debt, max_socialize_losses_mr_decrease);
 
     params.limits_params.min_order_usd_value = min_order_usd_value;
     params.limits_params.max_pending_orders = max_pending_orders;
@@ -588,6 +589,13 @@ public(package) fun set_collateral_oracle_params(
     events::emit_set_collateral_oracle_params(*ch_id, storage_id, source_id, oracle_tolerance)
 }
 
+/// The bad debt policy is declared at creation and never defaulted: `max_bad_debt` is the most
+/// bad debt (USD) a single liquidation may socialize once the insurance fund is exhausted, and
+/// `max_socialize_losses_mr_decrease` caps the margin ratio drop that socialization may inflict
+/// on the other side. With both at zero, socialization is off: a liquidation whose bad debt the
+/// insurance fund cannot cover aborts, and the position has to be closed by ADL instead, so such a
+/// market needs an ADL operator. `priority_taker_fee` is the extra taker fee charged to sessions
+/// paying above the reference gas price, or `none` to refuse them.
 fun create_market_params(
     registry_config: &Config,
     margin_ratio_initial: u256,
@@ -608,6 +616,9 @@ fun create_market_params(
     insurance_fund_fee: u256,
     lot_size: u64,
     tick_size: u64,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+    priority_taker_fee: Option<u256>,
     scaling_factor: u256,
 ): MarketParams {
     MarketParams {
@@ -630,7 +641,7 @@ fun create_market_params(
             taker_fee,
             liquidation_fee,
             insurance_fund_fee,
-            priority_taker_fee: option::some(1_000_000_000_000_000),
+            priority_taker_fee,
         },
         twap_params: TwapParams {
             funding_frequency_ms,
@@ -648,8 +659,8 @@ fun create_market_params(
             max_open_interest_position_percent: 200_000_000_000_000_000, // 20%
             max_book_index_spread: ifixed::from_u64fraction(5, 100),
             max_index_twap_divergence: ifixed::from_u64fraction(5, 100),
-            max_bad_debt: 0,
-            max_socialize_losses_mr_decrease: 0,
+            max_bad_debt,
+            max_socialize_losses_mr_decrease,
         },
     }
 }
@@ -1259,6 +1270,15 @@ public(package) fun assert_liquidation_fees_against_mmr(
             margin_ratio_maintenance,
         ),
         ELiquidationFeesExceedMaintenanceMarginRatio,
+    )
+}
+
+fun assert_bad_debt_limits(max_bad_debt: u256, max_socialize_losses_mr_decrease: u256) {
+    assert!(ifixed::greater_than_eq(max_bad_debt, 0), EInvalidMaxBadDebt);
+    assert!(
+        ifixed::greater_than_eq(max_socialize_losses_mr_decrease, 0)
+            && ifixed::less_than_eq(max_socialize_losses_mr_decrease, 1_000_000_000_000_000_000),
+        EInvalidMaxSocializeLossesMrDecrease,
     )
 }
 

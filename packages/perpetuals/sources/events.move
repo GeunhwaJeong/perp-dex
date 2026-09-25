@@ -53,6 +53,9 @@ public struct CreatedClearingHouse has copy, drop {
     insurance_fund_fee: u256,
     lot_size: u64,
     tick_size: u64,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+    priority_taker_fee: Option<u256>,
 }
 
 public struct ClosedMarket has copy, drop { ch_id: ID }
@@ -454,6 +457,9 @@ public(package) fun emit_created_clearing_house(
     insurance_fund_fee: u256,
     lot_size: u64,
     tick_size: u64,
+    max_bad_debt: u256,
+    max_socialize_losses_mr_decrease: u256,
+    priority_taker_fee: Option<u256>,
 ) {
     event::emit(CreatedClearingHouse {
         ch_id,
@@ -477,6 +483,9 @@ public(package) fun emit_created_clearing_house(
         insurance_fund_fee,
         lot_size,
         tick_size,
+        max_bad_debt,
+        max_socialize_losses_mr_decrease,
+        priority_taker_fee,
     })
 }
 
