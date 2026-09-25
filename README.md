@@ -45,6 +45,17 @@ haneul move build --build-env mainnet
 
 Every package builds without warnings.
 
+## Unit tests
+
+`ifixed`, `ordered_map` and `position` carry Move unit tests under their `tests/` directories:
+the fixed-point arithmetic is checked against a sign-and-magnitude reference on edge cases and
+pseudo-random operands, the B+ tree against a sorted vector under random insert, remove and
+batch-drop sequences, and the position accounting on hand-computed fills, funding and margin cases.
+
+```bash
+cd packages/ifixed && haneul move test --build-env mainnet
+```
+
 ## Localnet end-to-end tests
 
 `e2e/localnet_e2e.py` publishes all ten packages together with the `e2e/perp_e2e` helper package to
@@ -97,8 +108,8 @@ orders, and the vault's forced-withdrawal path.
 
 ## Status
 
-The packages are not published, and there are no Move unit tests yet; the localnet suite is the
-current test coverage.
+The packages are not published. Unit tests cover the three leaf packages above; the other seven
+are only exercised by the localnet suite.
 
 ## License
 
