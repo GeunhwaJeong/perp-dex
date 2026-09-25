@@ -325,3 +325,64 @@ fun accounts_withdraw_idle_collateral() {
     });
     t::finish(sc, fx);
 }
+
+// === Registry configuration ===
+
+#[test]
+fun registry_bounds_change_through_a_config_update() {
+    let (mut sc, fx) = t::setup();
+    sc.next_tx(t::admin(&fx));
+    let mut registry = sc.take_shared_by_id<Registry>(t::registry_id(&fx));
+    let mut update = perpetuals::registry::new_config_update();
+    update.set_account_limits(1_000_000, 7, 10);
+    update.set_proposal_and_order_value_bounds(86_400_000, 259_200_000, t::usd(1), t::usd(500));
+    registry.apply_config_update(t::perp_admin(&fx), update);
+    let config = registry.config();
+    assert!(config.up_max_pending_orders() == 7);
+    assert!(config.low_min_order_usd_value() == t::usd(1) && config.up_min_order_usd_value() == t::usd(500));
+    // Untouched bounds keep their values.
+    assert!(config.max_assistants_per_account() == 10 && config.min_oracle_tolerance() == 500);
+    ts::return_shared(registry);
+    // A market may not exceed the new pending order cap, and its minimum order value has to
+    // move into the new range at the same time.
+    with_market!(&mut sc, &fx, t::maker(), |ch, _account, _btc, _tusd, registry| {
+        ch.set_risk_limit_params(
+            t::perp_vk(&fx), registry, option::some(t::usd(1)), option::some(7), option::none(),
+            option::none(), option::none(), option::none(), option::none(), option::none(),
+            option::none(),
+        );
+    });
+    t::finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = 1009, location = perpetuals::market)]
+fun markets_are_bound_by_the_registry_pending_order_cap() {
+    let (mut sc, fx) = t::setup();
+    sc.next_tx(t::admin(&fx));
+    let mut registry = sc.take_shared_by_id<Registry>(t::registry_id(&fx));
+    let mut update = perpetuals::registry::new_config_update();
+    update.set_account_limits(1_000_000, 7, 10);
+    registry.apply_config_update(t::perp_admin(&fx), update);
+    ts::return_shared(registry);
+    with_market!(&mut sc, &fx, t::maker(), |ch, _account, _btc, _tusd, registry| {
+        ch.set_risk_limit_params(
+            t::perp_vk(&fx), registry, option::none(), option::some(8), option::none(),
+            option::none(), option::none(), option::none(), option::none(), option::none(),
+            option::none(),
+        );
+    });
+    t::finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = 5008, location = perpetuals::registry)]
+fun a_config_update_is_validated_as_a_whole() {
+    let (mut sc, fx) = t::setup();
+    sc.next_tx(t::admin(&fx));
+    let mut registry = sc.take_shared_by_id<Registry>(t::registry_id(&fx));
+    let mut update = perpetuals::registry::new_config_update();
+    // A minimum funding frequency above the minimum period is inconsistent.
+    update.set_timing_bounds(100_000, 60_000, 864_000_000, 1_000, 60_000, 1_000, 60_000);
+    registry.apply_config_update(t::perp_admin(&fx), update);
+    ts::return_shared(registry);
+    t::finish(sc, fx);
+}

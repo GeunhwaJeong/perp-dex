@@ -384,7 +384,7 @@ public(package) fun register_market<T>(
             keys::registry_collateral_info<T>(),
             CollateralInfo<T> { collateral_storage_id, collateral_source_id, scaling_factor },
         );
-        events::emit_registered_collateral_info<T>(collateral_storage_id, collateral_source_id, scaling_factor)
+        events::registered_collateral_info<T>(collateral_storage_id, collateral_source_id, scaling_factor)
     }
 }
 
@@ -617,12 +617,12 @@ public fun set_collateral_info<T, ADMIN_OR_ASSISTANT>(
     );
     info.collateral_storage_id = pfs.storage_id();
     info.collateral_source_id = source_id;
-    events::emit_registered_collateral_info<T>(info.collateral_storage_id, info.collateral_source_id, info.scaling_factor)
+    events::registered_collateral_info<T>(info.collateral_storage_id, info.collateral_source_id, info.scaling_factor)
 }
 
-public fun set_config<ADMIN_OR_ASSISTANT>(
-    registry: &mut Registry,
-    cap: &AuthorityCap<PACKAGE, ADMIN_OR_ASSISTANT>,
+/// A set of registry bounds to change; unset fields keep their current value. Built with
+/// `new_config_update` and the `set_*` setters, applied with `apply_config_update`.
+public struct ConfigUpdate has copy, drop {
     stop_order_geunhwa_cost: Option<u64>,
     max_abs_maker_fee: Option<u256>,
     max_abs_taker_fee: Option<u256>,
@@ -645,85 +645,142 @@ public fun set_config<ADMIN_OR_ASSISTANT>(
     max_index_twap_divergence: Option<u256>,
     up_max_pending_orders: Option<u64>,
     max_assistants_per_account: Option<u64>,
+}
+
+public fun new_config_update(): ConfigUpdate {
+    ConfigUpdate {
+        stop_order_geunhwa_cost: option::none(),
+        max_abs_maker_fee: option::none(),
+        max_abs_taker_fee: option::none(),
+        max_liquidation_fee: option::none(),
+        max_insurance_fund_fee: option::none(),
+        min_funding_frequency_ms: option::none(),
+        min_funding_period_ms: option::none(),
+        max_funding_period_ms: option::none(),
+        min_premium_twap_frequency_ms: option::none(),
+        min_premium_twap_period_ms: option::none(),
+        min_spread_twap_frequency_ms: option::none(),
+        min_spread_twap_period_ms: option::none(),
+        min_proposal_delay_ms: option::none(),
+        max_proposal_delay_ms: option::none(),
+        low_min_order_usd_value: option::none(),
+        up_min_order_usd_value: option::none(),
+        insurance_open_interest_fraction: option::none(),
+        min_oracle_tolerance: option::none(),
+        max_book_index_spread: option::none(),
+        max_index_twap_divergence: option::none(),
+        up_max_pending_orders: option::none(),
+        max_assistants_per_account: option::none(),
+    }
+}
+
+public fun set_fee_caps(
+    update: &mut ConfigUpdate,
+    max_abs_maker_fee: u256,
+    max_abs_taker_fee: u256,
+    max_liquidation_fee: u256,
+    max_insurance_fund_fee: u256,
+) {
+    update.max_abs_maker_fee = option::some(max_abs_maker_fee);
+    update.max_abs_taker_fee = option::some(max_abs_taker_fee);
+    update.max_liquidation_fee = option::some(max_liquidation_fee);
+    update.max_insurance_fund_fee = option::some(max_insurance_fund_fee);
+}
+
+/// Funding frequency floor, funding period bounds, and the premium and spread TWAP floors.
+public fun set_timing_bounds(
+    update: &mut ConfigUpdate,
+    min_funding_frequency_ms: u64,
+    min_funding_period_ms: u64,
+    max_funding_period_ms: u64,
+    min_premium_twap_frequency_ms: u64,
+    min_premium_twap_period_ms: u64,
+    min_spread_twap_frequency_ms: u64,
+    min_spread_twap_period_ms: u64,
+) {
+    update.min_funding_frequency_ms = option::some(min_funding_frequency_ms);
+    update.min_funding_period_ms = option::some(min_funding_period_ms);
+    update.max_funding_period_ms = option::some(max_funding_period_ms);
+    update.min_premium_twap_frequency_ms = option::some(min_premium_twap_frequency_ms);
+    update.min_premium_twap_period_ms = option::some(min_premium_twap_period_ms);
+    update.min_spread_twap_frequency_ms = option::some(min_spread_twap_frequency_ms);
+    update.min_spread_twap_period_ms = option::some(min_spread_twap_period_ms);
+}
+
+/// Margin ratio proposal delay bounds and the range a market's minimum order value may take.
+public fun set_proposal_and_order_value_bounds(
+    update: &mut ConfigUpdate,
+    min_proposal_delay_ms: u64,
+    max_proposal_delay_ms: u64,
+    low_min_order_usd_value: u256,
+    up_min_order_usd_value: u256,
+) {
+    update.min_proposal_delay_ms = option::some(min_proposal_delay_ms);
+    update.max_proposal_delay_ms = option::some(max_proposal_delay_ms);
+    update.low_min_order_usd_value = option::some(low_min_order_usd_value);
+    update.up_min_order_usd_value = option::some(up_min_order_usd_value);
+}
+
+/// Insurance reserve fraction, oracle tolerance floor, and the caps on the book-index spread
+/// and index-TWAP divergence a market may allow.
+public fun set_risk_caps(
+    update: &mut ConfigUpdate,
+    insurance_open_interest_fraction: u256,
+    min_oracle_tolerance: u64,
+    max_book_index_spread: u256,
+    max_index_twap_divergence: u256,
+) {
+    update.insurance_open_interest_fraction = option::some(insurance_open_interest_fraction);
+    update.min_oracle_tolerance = option::some(min_oracle_tolerance);
+    update.max_book_index_spread = option::some(max_book_index_spread);
+    update.max_index_twap_divergence = option::some(max_index_twap_divergence);
+}
+
+/// Stop order gas floor, the pending order cap a market may set, and assistants per account.
+public fun set_account_limits(
+    update: &mut ConfigUpdate,
+    stop_order_geunhwa_cost: u64,
+    up_max_pending_orders: u64,
+    max_assistants_per_account: u64,
+) {
+    update.stop_order_geunhwa_cost = option::some(stop_order_geunhwa_cost);
+    update.up_max_pending_orders = option::some(up_max_pending_orders);
+    update.max_assistants_per_account = option::some(max_assistants_per_account);
+}
+
+/// Applies `update` to the registry's bounds after validating the resulting configuration.
+public fun apply_config_update<ADMIN_OR_ASSISTANT>(
+    registry: &mut Registry,
+    cap: &AuthorityCap<PACKAGE, ADMIN_OR_ASSISTANT>,
+    update: ConfigUpdate,
 ) {
     registry.assert_package_version();
     registry.assert_admin_or_authorized_assistant_authority_cap(cap);
 
     // Unset options keep their current value.
     let current = registry.config();
-    let stop_order_geunhwa_cost = option_u64_or(&stop_order_geunhwa_cost, current.stop_order_geunhwa_cost);
-    let max_abs_maker_fee = option_u256_or(&max_abs_maker_fee, current.max_abs_maker_fee);
-    let max_abs_taker_fee = option_u256_or(&max_abs_taker_fee, current.max_abs_taker_fee);
-    let max_liquidation_fee = option_u256_or(&max_liquidation_fee, current.max_liquidation_fee);
-    let max_insurance_fund_fee = option_u256_or(
-        &max_insurance_fund_fee,
-        current.max_insurance_fund_fee,
-    );
-    let min_funding_frequency_ms = option_u64_or(
-        &min_funding_frequency_ms,
-        current.min_funding_frequency_ms,
-    );
-    let min_funding_period_ms = option_u64_or(
-        &min_funding_period_ms,
-        current.min_funding_period_ms,
-    );
-    let max_funding_period_ms = option_u64_or(
-        &max_funding_period_ms,
-        current.max_funding_period_ms,
-    );
-    let min_premium_twap_frequency_ms = option_u64_or(
-        &min_premium_twap_frequency_ms,
-        current.min_premium_twap_frequency_ms,
-    );
-    let min_premium_twap_period_ms = option_u64_or(
-        &min_premium_twap_period_ms,
-        current.min_premium_twap_period_ms,
-    );
-    let min_spread_twap_frequency_ms = option_u64_or(
-        &min_spread_twap_frequency_ms,
-        current.min_spread_twap_frequency_ms,
-    );
-    let min_spread_twap_period_ms = option_u64_or(
-        &min_spread_twap_period_ms,
-        current.min_spread_twap_period_ms,
-    );
-    let min_proposal_delay_ms = option_u64_or(
-        &min_proposal_delay_ms,
-        current.min_proposal_delay_ms,
-    );
-    let max_proposal_delay_ms = option_u64_or(
-        &max_proposal_delay_ms,
-        current.max_proposal_delay_ms,
-    );
-    let low_min_order_usd_value = option_u256_or(
-        &low_min_order_usd_value,
-        current.low_min_order_usd_value,
-    );
-    let up_min_order_usd_value = option_u256_or(
-        &up_min_order_usd_value,
-        current.up_min_order_usd_value,
-    );
-    let insurance_open_interest_fraction = option_u256_or(
-        &insurance_open_interest_fraction,
-        current.insurance_open_interest_fraction,
-    );
-    let min_oracle_tolerance = option_u64_or(&min_oracle_tolerance, current.min_oracle_tolerance);
-    let max_book_index_spread = option_u256_or(
-        &max_book_index_spread,
-        current.max_book_index_spread,
-    );
-    let max_index_twap_divergence = option_u256_or(
-        &max_index_twap_divergence,
-        current.max_index_twap_divergence,
-    );
-    let up_max_pending_orders = option_u64_or(
-        &up_max_pending_orders,
-        current.up_max_pending_orders,
-    );
-    let max_assistants_per_account = option_u64_or(
-        &max_assistants_per_account,
-        current.max_assistants_per_account,
-    );
+    let stop_order_geunhwa_cost = option_u64_or(&update.stop_order_geunhwa_cost, current.stop_order_geunhwa_cost);
+    let max_abs_maker_fee = option_u256_or(&update.max_abs_maker_fee, current.max_abs_maker_fee);
+    let max_abs_taker_fee = option_u256_or(&update.max_abs_taker_fee, current.max_abs_taker_fee);
+    let max_liquidation_fee = option_u256_or(&update.max_liquidation_fee, current.max_liquidation_fee);
+    let max_insurance_fund_fee = option_u256_or(&update.max_insurance_fund_fee, current.max_insurance_fund_fee);
+    let min_funding_frequency_ms = option_u64_or(&update.min_funding_frequency_ms, current.min_funding_frequency_ms);
+    let min_funding_period_ms = option_u64_or(&update.min_funding_period_ms, current.min_funding_period_ms);
+    let max_funding_period_ms = option_u64_or(&update.max_funding_period_ms, current.max_funding_period_ms);
+    let min_premium_twap_frequency_ms = option_u64_or(&update.min_premium_twap_frequency_ms, current.min_premium_twap_frequency_ms);
+    let min_premium_twap_period_ms = option_u64_or(&update.min_premium_twap_period_ms, current.min_premium_twap_period_ms);
+    let min_spread_twap_frequency_ms = option_u64_or(&update.min_spread_twap_frequency_ms, current.min_spread_twap_frequency_ms);
+    let min_spread_twap_period_ms = option_u64_or(&update.min_spread_twap_period_ms, current.min_spread_twap_period_ms);
+    let min_proposal_delay_ms = option_u64_or(&update.min_proposal_delay_ms, current.min_proposal_delay_ms);
+    let max_proposal_delay_ms = option_u64_or(&update.max_proposal_delay_ms, current.max_proposal_delay_ms);
+    let low_min_order_usd_value = option_u256_or(&update.low_min_order_usd_value, current.low_min_order_usd_value);
+    let up_min_order_usd_value = option_u256_or(&update.up_min_order_usd_value, current.up_min_order_usd_value);
+    let insurance_open_interest_fraction = option_u256_or(&update.insurance_open_interest_fraction, current.insurance_open_interest_fraction);
+    let min_oracle_tolerance = option_u64_or(&update.min_oracle_tolerance, current.min_oracle_tolerance);
+    let max_book_index_spread = option_u256_or(&update.max_book_index_spread, current.max_book_index_spread);
+    let max_index_twap_divergence = option_u256_or(&update.max_index_twap_divergence, current.max_index_twap_divergence);
+    let up_max_pending_orders = option_u64_or(&update.up_max_pending_orders, current.up_max_pending_orders);
+    let max_assistants_per_account = option_u64_or(&update.max_assistants_per_account, current.max_assistants_per_account);
 
     // Fee caps and fractions are IFixed values in [0, 1] (1.0 = 1e18).
     assert!(

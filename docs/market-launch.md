@@ -6,7 +6,8 @@ running afterwards. Every step names the Move entry point; the localnet suite
 
 ## 1. Package configuration (once per deployment)
 
-`registry::set_config` holds the bounds every market is validated against: fee caps, funding and
+The registry holds the bounds every market is validated against, changed through a
+`registry::ConfigUpdate` (`new_config_update`, the `set_*` setters, `apply_config_update`): fee caps, funding and
 TWAP bounds, proposal delays, minimum order value range, the insurance reserve fraction, the
 oracle tolerance floor, and the pending order and assistant caps. Review them before the first
 market; the defaults are conservative but not tuned for any particular asset.
