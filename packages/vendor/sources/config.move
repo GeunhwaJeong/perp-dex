@@ -112,6 +112,19 @@ entry fun register_vendor<VendorKey, ADMIN_OR_ASSISTANT>(
     transfer::public_transfer(admin_cap, recipient)
 }
 
+/// Test-only twin of `register_vendor` that returns the cap instead of transferring it.
+#[test_only]
+public fun register_vendor_for_testing<VendorKey, ADMIN_OR_ASSISTANT>(
+    config: &mut Config,
+    cap: &AuthorityCap<PACKAGE, ADMIN_OR_ASSISTANT>,
+): AuthorityCap<VENDOR<VendorKey>, ADMIN> {
+    config.assert_package_version();
+    config.assert_has_active_package_authority(cap);
+    let admin_cap = vendor_authority::create_vendor_admin_cap<VendorKey>(&mut config.id);
+    config.authorize_authority_cap(&admin_cap);
+    admin_cap
+}
+
 public fun create_package_revoke_vendor_guardian_cap(
     config: &mut Config,
     _: &AuthorityCap<PACKAGE, ADMIN>,

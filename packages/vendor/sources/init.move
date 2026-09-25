@@ -19,3 +19,8 @@ fun init(witness: INIT, ctx: &mut TxContext) {
     transfer::public_share_object(config);
     package::claim_and_keep(witness, ctx)
 }
+
+#[test_only]
+public fun init_for_testing(ctx: &mut TxContext) {
+    init(INIT {}, ctx)
+}
