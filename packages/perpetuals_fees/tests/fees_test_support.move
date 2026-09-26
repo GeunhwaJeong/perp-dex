@@ -110,7 +110,7 @@ public fun stake(sc: &mut Scenario, fx: &Fx, ffx: &FeesFx, owner: address, amoun
     ts::return_shared(tier_registry);
 }
 
-/// A trading session for account `who`, ended through `fees::end_session`.
+/// A trading session for account `who`, ended through `fees::end_session`, signed by the admin.
 public macro fun fees_session(
     $sc: &mut Scenario,
     $fx: &Fx,
@@ -119,7 +119,21 @@ public macro fun fees_session(
     $f: |&mut SessionHotPotato<TUSD>|,
 ): SessionSummary {
     let (sc, fx, ffx) = ($sc, $fx, $ffx);
-    sc.next_tx(fx.admin());
+    let sender = fx.admin();
+    fees_session_as!(sc, fx, ffx, $who, sender, $f)
+}
+
+/// `fees_session` signed by `sender`.
+public macro fun fees_session_as(
+    $sc: &mut Scenario,
+    $fx: &Fx,
+    $ffx: &FeesFx,
+    $who: u64,
+    $sender: address,
+    $f: |&mut SessionHotPotato<TUSD>|,
+): SessionSummary {
+    let (sc, fx, ffx) = ($sc, $fx, $ffx);
+    sc.next_tx($sender);
     let clearing_house = sc.take_shared_by_id<ClearingHouse<TUSD>>(fx.ch_id());
     let mut account = sc.take_shared_by_id<Account<TUSD>>(fx.account_obj($who));
     let pfs_btc = sc.take_shared_by_id<PriceFeedStorage>(fx.pfs_btc_id());
@@ -145,9 +159,15 @@ public macro fun fees_session(
     summary
 }
 
-/// Caches account `who`'s multipliers on the market without trading.
+/// Caches account `who`'s multipliers on the market without trading, signed by the admin.
 public fun refresh(sc: &mut Scenario, fx: &Fx, ffx: &FeesFx, who: u64) {
-    sc.next_tx(fx.admin());
+    refresh_as(sc, fx, ffx, who, fx.admin())
+}
+
+/// `refresh` signed by `sender`. The fixture keeps the account caps outside any address, so any
+/// sender can present them.
+public fun refresh_as(sc: &mut Scenario, fx: &Fx, ffx: &FeesFx, who: u64, sender: address) {
+    sc.next_tx(sender);
     let mut clearing_house = sc.take_shared_by_id<ClearingHouse<TUSD>>(fx.ch_id());
     let mut account = sc.take_shared_by_id<Account<TUSD>>(fx.account_obj(who));
     let registry = sc.take_shared_by_id<Registry>(fx.registry_id());
@@ -162,6 +182,35 @@ public fun refresh(sc: &mut Scenario, fx: &Fx, ffx: &FeesFx, who: u64) {
     ts::return_shared(registry);
     ts::return_shared(schedule);
     ts::return_shared(tier_registry);
+}
+
+/// Registers `sender` as account `who`'s tier address.
+public fun set_tier_address(sc: &mut Scenario, fx: &Fx, who: u64, sender: address) {
+    sc.next_tx(sender);
+    let mut account = sc.take_shared_by_id<Account<TUSD>>(fx.account_obj(who));
+    let registry = sc.take_shared_by_id<Registry>(fx.registry_id());
+    fees::set_tier_address(&mut account, fx.cap(who), &registry, sc.ctx());
+    ts::return_shared(account);
+    ts::return_shared(registry);
+}
+
+/// Clears account `who`'s tier address.
+public fun clear_tier_address(sc: &mut Scenario, fx: &Fx, who: u64) {
+    sc.next_tx(fx.admin());
+    let mut account = sc.take_shared_by_id<Account<TUSD>>(fx.account_obj(who));
+    let registry = sc.take_shared_by_id<Registry>(fx.registry_id());
+    fees::clear_tier_address(&mut account, fx.cap(who), &registry);
+    ts::return_shared(account);
+    ts::return_shared(registry);
+}
+
+/// The address whose stake would price account `who` when `sender` signs.
+public fun tier_address_of(sc: &mut Scenario, fx: &Fx, who: u64, sender: address): address {
+    sc.next_tx(fx.admin());
+    let account = sc.take_shared_by_id<Account<TUSD>>(fx.account_obj(who));
+    let tier_address = fees::tier_address(&account, sender);
+    ts::return_shared(account);
+    tier_address
 }
 
 /// The multipliers the market holds for account `who` right now.

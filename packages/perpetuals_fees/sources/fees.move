@@ -15,13 +15,16 @@
 /// second, unswept copy per maker and one for the whole market give the maker's share of the
 /// market's maker volume, which decides the rebate tier.
 ///
-/// The staking tier is read from the `staking_tiers` registry for the transaction sender, so
-/// the discount follows the address that signs, not the account object.
+/// The staking tier is read from the `staking_tiers` registry for the account's tier address:
+/// the address its admin registered with `set_tier_address` (which can only be the registering
+/// signer itself), or, for an account without one, the address signing the transaction. An owner
+/// who trades through assistant keys registers once and keeps the discount on every session; an
+/// account cannot point at a stake it does not control.
 ///
 /// Sessions ended directly through the perpetuals core still work; they simply record no volume.
 module perpetuals_fees::fees;
 
-use authority_cap::authority::AuthorityCap;
+use authority_cap::authority::{ADMIN, AuthorityCap};
 use haneul::clock::Clock;
 use haneul::event;
 use ifixed::ifixed;
@@ -48,12 +51,16 @@ public struct MakerVolumeKey has copy, drop, store { account_id: u64 }
 /// A market's maker volume over the window.
 public struct MarketMakerVolumeKey has copy, drop, store {}
 
+/// The address whose stake prices the account (see `set_tier_address`).
+public struct TierAddressKey has copy, drop, store {}
+
 // === Events ===
 
 public struct TierApplied has copy, drop {
     ch_id: ID,
     account_id: u64,
     sender: address,
+    tier_address: address,
     volume: u256,
     maker_volume: u256,
     stake: u64,
@@ -62,6 +69,10 @@ public struct TierApplied has copy, drop {
     maker_multiplier: u256,
     expires_ms: u64,
 }
+
+public struct TierAddressSet has copy, drop { account_id: u64, tier_address: address }
+
+public struct TierAddressCleared has copy, drop { account_id: u64 }
 
 // === Entry points ===
 
@@ -114,7 +125,60 @@ public fun refresh<T, ADMIN_OR_ASSISTANT>(
     apply_multipliers(clearing_house, account, registry, schedule, tiers, volume, clock, ctx);
 }
 
+/// Registers the signer as the address whose stake prices `account`. From then on every
+/// session and refresh of the account reads that address's stake, whoever signs it. The
+/// account's admin cap is required and the address is always the signer's own, so an account
+/// cannot borrow a stranger's stake and an assistant key can neither register nor redirect the
+/// tier. Registering again replaces the address; `clear_tier_address` returns the account to
+/// signer-based pricing.
+public fun set_tier_address<T>(
+    account: &mut Account<T>,
+    cap: &AuthorityCap<ACCOUNT, ADMIN>,
+    registry: &Registry,
+    ctx: &TxContext,
+) {
+    account.assert_authority_cap_is_valid(cap);
+    let witness = extension::witness();
+    let tier_address = ctx.sender();
+    if (account.has_extension_field<T, FEES, TierAddressKey>(TierAddressKey {})) {
+        let _: address = account.remove_extension_field_as_extension<T, FEES, TierAddressKey, address>(
+            &witness, registry, TierAddressKey {},
+        );
+    };
+    account.add_extension_field_as_extension<T, FEES, TierAddressKey, address>(
+        &witness, registry, TierAddressKey {}, tier_address,
+    );
+    event::emit(TierAddressSet { account_id: account.account_id(), tier_address });
+}
+
+/// Removes the account's tier address; its sessions are priced by their signer again.
+public fun clear_tier_address<T>(
+    account: &mut Account<T>,
+    cap: &AuthorityCap<ACCOUNT, ADMIN>,
+    registry: &Registry,
+) {
+    account.assert_authority_cap_is_valid(cap);
+    if (account.has_extension_field<T, FEES, TierAddressKey>(TierAddressKey {})) {
+        let _: address = account.remove_extension_field_as_extension<T, FEES, TierAddressKey, address>(
+            &extension::witness(), registry, TierAddressKey {},
+        );
+    };
+    event::emit(TierAddressCleared { account_id: account.account_id() });
+}
+
 // === Views ===
+
+/// The address whose stake prices `account` when `sender` signs: the registered tier address,
+/// or `sender` itself without one.
+public fun tier_address<T>(account: &Account<T>, sender: address): address {
+    if (!account.has_extension_field<T, FEES, TierAddressKey>(TierAddressKey {})) return sender;
+    *account.borrow_extension_field<T, FEES, TierAddressKey, address>(TierAddressKey {})
+}
+
+/// Whether `account` has a registered tier address.
+public fun has_tier_address<T>(account: &Account<T>): bool {
+    account.has_extension_field<T, FEES, TierAddressKey>(TierAddressKey {})
+}
 
 /// Volume the account has in its window at `epoch`: taker volume plus swept maker volume.
 public fun volume<T>(account: &Account<T>, epoch: u64): u256 {
@@ -159,7 +223,7 @@ public fun multipliers_for<T>(
     let volume = ifixed::add(volume(account, epoch), unswept_maker_volume(clearing_house, account_id, epoch));
     schedule.multipliers(
         volume,
-        tiers.active_stake(sender),
+        tiers.active_stake(tier_address(account, sender)),
         maker_share(clearing_house, account_id, epoch),
         maker_volume(clearing_house, account_id, epoch),
     )
@@ -256,7 +320,8 @@ fun apply_multipliers<T>(
     ctx: &TxContext,
 ) {
     let sender = ctx.sender();
-    let stake = tiers.active_stake(sender);
+    let tier_address = tier_address(account, sender);
+    let stake = tiers.active_stake(tier_address);
     let account_id = account.account_id();
     let epoch = ctx.epoch();
     let maker_share = maker_share(clearing_house, account_id, epoch);
@@ -276,6 +341,7 @@ fun apply_multipliers<T>(
         ch_id: object::id(clearing_house),
         account_id,
         sender,
+        tier_address,
         volume,
         maker_volume,
         stake,

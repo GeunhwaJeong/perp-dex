@@ -11,13 +11,16 @@ use perpetuals::test_support::{Self as t};
 use perpetuals::tusd::TUSD;
 use perpetuals_fees::extension;
 use perpetuals_fees::fees;
-use perpetuals_fees::fees_test_support::{Self as f, fees_session, musd, uusd, pct, bps, neg};
+use perpetuals_fees::fees_test_support::{Self as f, fees_session, fees_session_as, musd, uusd, pct, bps, neg};
 use haneul::test_scenario::Scenario;
 use perpetuals::test_support::Fx;
 
 const ONE: u256 = 1_000_000_000_000_000_000;
 const ASK: bool = true;
 const BID: bool = false;
+/// An account owner who stakes, and the API key it trades through.
+const OWNER: address = @0xA11CE;
+const BOT: address = @0xB07;
 
 fun fraction(numerator: u256, denominator: u256): u256 { numerator * ONE / denominator }
 
@@ -124,6 +127,78 @@ fun an_expired_multiplier_means_full_fees() {
     // The session itself renewed the cache.
     let (taker, _) = f::multipliers_on_market(&mut sc, &fx, t::taker());
     assert!(taker == fraction(3, 5));
+    f::finish(sc, fx, ffx);
+}
+
+// === Tier address ===
+
+#[test]
+fun an_unregistered_account_is_priced_by_its_signer() {
+    let (mut sc, fx, ffx) = f::setup();
+    f::stake(&mut sc, &fx, &ffx, OWNER, 1_000 * f::haneul());
+    assert!(f::tier_address_of(&mut sc, &fx, t::taker(), BOT) == BOT);
+    // The owner's stake counts when the owner signs, and not when its bot does.
+    f::refresh_as(&mut sc, &fx, &ffx, t::taker(), OWNER);
+    let (taker, _) = f::multipliers_on_market(&mut sc, &fx, t::taker());
+    assert!(taker == fraction(3, 5));
+    f::refresh_as(&mut sc, &fx, &ffx, t::taker(), BOT);
+    let (taker, maker) = f::multipliers_on_market(&mut sc, &fx, t::taker());
+    assert!(taker == ONE && maker == ONE);
+    f::finish(sc, fx, ffx);
+}
+
+#[test]
+fun a_registered_tier_address_prices_every_signer() {
+    let (mut sc, fx, ffx) = f::setup();
+    f::stake(&mut sc, &fx, &ffx, OWNER, 1_000 * f::haneul());
+    f::set_tier_address(&mut sc, &fx, t::taker(), OWNER);
+    assert!(f::tier_address_of(&mut sc, &fx, t::taker(), BOT) == OWNER);
+    // The bot's refresh and session now read the owner's stake.
+    f::refresh_as(&mut sc, &fx, &ffx, t::taker(), BOT);
+    let (taker, maker) = f::multipliers_on_market(&mut sc, &fx, t::taker());
+    assert!(taker == fraction(3, 5) && maker == fraction(3, 5));
+    t::ladder(&mut sc, &fx, 100_000);
+    let before = f::collateral_of(&mut sc, &fx, t::taker());
+    fees_session_as!(&mut sc, &fx, &ffx, t::taker(), BOT, |hp| {
+        hp.place_market_order(BID, t::mbtc(100), false);
+    });
+    // 0.05% of 10,000 less the owner's 40% discount, on a session the bot signed.
+    assert!(before - f::collateral_of(&mut sc, &fx, t::taker()) == musd(3_000));
+    let (taker, _) = f::multipliers_on_market(&mut sc, &fx, t::taker());
+    assert!(taker == fraction(3, 5));
+    f::finish(sc, fx, ffx);
+}
+
+#[test]
+fun the_tier_address_is_always_the_registering_signer() {
+    let (mut sc, fx, ffx) = f::setup();
+    f::stake(&mut sc, &fx, &ffx, OWNER, 1_000 * f::haneul());
+    // A stranger holding the cap can only register itself, never the owner's stake.
+    f::set_tier_address(&mut sc, &fx, t::taker(), BOT);
+    assert!(f::tier_address_of(&mut sc, &fx, t::taker(), OWNER) == BOT);
+    f::refresh_as(&mut sc, &fx, &ffx, t::taker(), OWNER);
+    let (taker, _) = f::multipliers_on_market(&mut sc, &fx, t::taker());
+    assert!(taker == ONE);
+    // Registering again replaces the address; clearing returns to the signer.
+    f::set_tier_address(&mut sc, &fx, t::taker(), OWNER);
+    assert!(f::tier_address_of(&mut sc, &fx, t::taker(), BOT) == OWNER);
+    f::clear_tier_address(&mut sc, &fx, t::taker());
+    assert!(f::tier_address_of(&mut sc, &fx, t::taker(), BOT) == BOT);
+    f::refresh_as(&mut sc, &fx, &ffx, t::taker(), BOT);
+    let (taker, _) = f::multipliers_on_market(&mut sc, &fx, t::taker());
+    assert!(taker == ONE);
+    f::finish(sc, fx, ffx);
+}
+
+#[test, expected_failure(abort_code = 4000, location = perpetuals::account)]
+fun a_foreign_cap_cannot_register_a_tier_address() {
+    let (mut sc, fx, ffx) = f::setup();
+    sc.next_tx(OWNER);
+    let mut account = sc.take_shared_by_id<perpetuals::account::Account<TUSD>>(fx.account_obj(t::taker()));
+    let registry = sc.take_shared_by_id<Registry>(fx.registry_id());
+    fees::set_tier_address(&mut account, fx.cap(t::maker()), &registry, sc.ctx());
+    ts::return_shared(account);
+    ts::return_shared(registry);
     f::finish(sc, fx, ffx);
 }
 
