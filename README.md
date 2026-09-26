@@ -22,7 +22,7 @@ None of the packages are published yet; every package address is `0x0`.
 | `perpetuals` | account, adl, authority, clearing_house, events, init, keys, market, orderbook, registry | Clearing house, order book, markets, accounts, liquidation, ADL, and the extension gate other packages drive sessions through | vendor, ifixed, authority_cap, position, oracle_aggregator, ordered_map |
 | `perpetuals_orders` | events, extension, stop_orders, twap_orders | Stop loss / take profit, standalone stop and TWAP order tickets, executed through the perpetuals extension gate with the `ORDERS` witness | perpetuals, authority_cap, oracle_aggregator, ifixed |
 | `staking_tiers` | registry | Holds deposited `StakedHaneul` objects and grades each address by active principal, with a withdrawal delay; a chain-wide staking tier any package can read | haneul_system |
-| `perpetuals_fees` | config, extension, fees, volume | Fee tiers: a schedule of volume tiers, staking discounts and maker-share rebates, rolling volume windows per account and per market, and the fee multipliers cached on each market through the extension gate with the `FEES` witness | perpetuals, staking_tiers, authority_cap, ifixed |
+| `perpetuals_fees` | config, extension, fees, volume | Fee tiers: a schedule of volume tiers, staking discounts and maker-share rebates (each share tier with a floor of the maker's own volume), rolling volume windows per account and per market, an account's registered tier address, and the fee multipliers cached on each market through the extension gate with the `FEES` witness | perpetuals, staking_tiers, authority_cap, ifixed |
 | `market_making_vault` | authority, config, errors, events, init, interface, keys, metadata, perpetuals_api, vault | LP vaults: deposits, withdrawal requests, trading sessions run by the vault owner | perpetuals, perpetuals_orders and six others |
 
 Publish order: `ifixed`, `authority_cap`, `ordered_map`, `af_lp`, then `position`, `vendor`, then
@@ -38,8 +38,8 @@ in its setup.
 The core charges each market's own maker and taker rates. `perpetuals_fees` discounts them per
 account: ending a session through `fees::end_session` records the session's taker notional in a
 rolling window of epochs kept on the account, credits each maker it filled with maker volume on
-the market, looks up the sender's active stake in the `staking_tiers` registry, and caches the
-resulting (taker, maker) multipliers on the market with
+the market, looks up the account's tier address's active stake in the `staking_tiers` registry,
+and caches the resulting (taker, maker) multipliers on the market with
 `clearing_house::set_fee_multiplier_as_extension`. The next sessions on that market, as taker or as
 maker, are charged the market rate times the multiplier until the cache expires; `fees::refresh`
 caches without trading.
@@ -58,13 +58,21 @@ schedule also refuses a rebate larger than the smallest taker rate any account c
 The schedule (`config::set_schedule`) lists volume tiers as absolute rates against reference base
 rates, staking tiers as a discount on top and maker-share tiers as the maker rate (a negative one
 is a rebate) for makers above a share of a market's maker volume; all three are shaped like
-Hyperliquid's table and every value is an admin setting. The staking discount applies to fees
-paid, never to a rebate.
+Hyperliquid's table and every value is an admin setting. Each share tier also carries a floor of
+maker volume the maker itself must have on that market over the window, because the share is
+per market and one maker is trivially the whole of a new or thin market; the floors ascend with
+the tiers. The staking discount applies to fees paid, never to a rebate.
 
 Staking is native: an address deposits its `StakedHaneul` objects into the registry, keeps
 earning validator rewards on them, and counts their principal toward its tier at once. Leaving
 takes a withdrawal request and the registry's delay (seven days by default), during which the
 principal no longer counts.
+
+Which address's stake prices an account is the account's tier address: the account admin
+registers the address it signs with (`fees::set_tier_address`, admin cap only, always the
+signer itself), and from then on every session of the account reads that stake whichever key
+signs, so an owner trading through assistant keys keeps its discount. An account without one is
+priced by the signer of each session; `fees::clear_tier_address` returns to that.
 
 ## Dependencies
 
@@ -109,7 +117,7 @@ and `account`) is how further features can live in packages of their own.
 
 ## Unit tests
 
-Nine packages carry Move unit tests under their `tests/` directories, 292 in total:
+Nine packages carry Move unit tests under their `tests/` directories, 299 in total:
 
 | Package | Tests | What is checked |
 |---|---|---|
@@ -121,7 +129,7 @@ Nine packages carry Move unit tests under their `tests/` directories, 292 in tot
 | `perpetuals` | 92 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization and ADL (13); pausing, close and settlement, treasury, proposals, freezing, registry configuration and the extension gate (23) |
 | `perpetuals_orders` | 43 | Stop loss / take profit and standalone stop tickets (23); TWAP tickets (20) |
 | `staking_tiers` | 9 | Deposits on a `test_runner` system state with a real validator, tier thresholds, the withdrawal request, delay, cancel and withdraw paths, and owner and admin checks |
-| `perpetuals_fees` | 22 | The volume window, merging and stale epochs (4); schedule validation, the rebate bound and multiplier math (5); sessions on the perpetuals fixture: volume recording, the cached tier on the next session, the staking discount, the maker-side multiplier, expiry, maker volume credited on the market and swept on refresh, a share rebate paid out of the taker fee, the per-fill rebate cap, and the core's authorization and bound checks (13) |
+| `perpetuals_fees` | 29 | The volume window, merging and stale epochs (4); schedule validation, the share floors' order, the base maker fee a rebate needs, the rebate bound and multiplier math (7); sessions on the perpetuals fixture: volume recording, the cached tier on the next session, the staking discount, the maker-side multiplier, expiry, the tier address (signer pricing without one, an owner's stake on a bot-signed session with one, the address always being the registering signer, a foreign cap refused), maker volume credited on the market and swept on refresh, a whole-market share below the volume floor earning nothing, a share rebate paid out of the taker fee, the per-fill rebate cap, and the core's authorization and bound checks (18) |
 
 The perpetuals tests run on a `test_scenario` fixture (`tests/test_support.move`) that stands up
 the vendor, oracle and perpetuals packages, a mock price source and one BTC/USD market with the
@@ -149,7 +157,7 @@ python3 e2e/localnet_e2e.py
 
 The script uses `deps/bin/haneul` when it exists and `haneul` on `PATH` otherwise; set `HANEUL` to
 use another binary. It refuses to run unless the active environment is local and the chain is not
-Haneul mainnet. A full run takes about four minutes and ends with `234/234 checks passed`.
+Haneul mainnet. A full run takes about four minutes and ends with `241/241 checks passed`.
 
 | Scenario | What is checked |
 |---|---|
@@ -164,7 +172,7 @@ Haneul mainnet. A full run takes about four minutes and ends with `234/234 check
 | S8 | Fee withdrawal, insurance fund donation, market pause and resume |
 | S9 | Market close, settlement of every position, conservation of TUSD |
 | S10 | Market-making vault: creation, deposits and LP pricing, trading through the vault, lock period, withdrawal with owner fee, pause |
-| S11 | Fee tiers: the schedule and staking thresholds, a session ended through `perpetuals_fees` that records volume and caches a multiplier, a real `StakedHaneul` deposited into the tier registry, the 40% staking discount on the next fill, the second volume tier, the withdrawal request dropping the tier, the early withdrawal rejected, the cancel, the maker's swept volume and whole-market share, and a fill that pays the maker a rebate |
+| S11 | Fee tiers: the schedule and staking thresholds, the tier address registered (and a foreign cap refused), a session ended through `perpetuals_fees` that records volume and caches a multiplier priced by that address, the maker's whole-market share reaching only the first rebate tier on one fill, a real `StakedHaneul` deposited into the tier registry, the 40% staking discount on the next fill, the second volume tier, the withdrawal request dropping the tier, the early withdrawal rejected, the cancel, the maker's swept volume passing the second floor, and a fill that pays the maker a rebate |
 
 In total 29 of the checks are actions that must be rejected with a specific abort code. After every
 step the script also checks that each market's collateral equals the sum of position equity at entry
