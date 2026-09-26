@@ -205,6 +205,121 @@ fun uncovered_bad_debt_is_socialized_through_funding() {
     t::finish(sc, fx);
 }
 
+// === Collateral haircut ===
+
+/// Sets a 10% collateral haircut on the market.
+fun set_haircut(sc: &mut haneul::test_scenario::Scenario, fx: &t::Fx) {
+    with_market!(sc, fx, t::maker(), |ch, _account, _btc, _tusd, registry| {
+        ch.set_core_params(
+            t::perp_vk(fx), registry, option::none(), option::none(),
+            option::some(ifixed::ifixed::from_u64fraction(10, 100)),
+        );
+    });
+}
+
+/// The taker goes long 1.7 BTC at 100,000: 170,000 of notional on 19,915 of collateral, which
+/// the 10% haircut values at 17,923.5 against the 17,000 the initial margin needs.
+fun open_long_under_haircut(sc: &mut haneul::test_scenario::Scenario, fx: &t::Fx) {
+    session!(sc, fx, t::maker(), false, false, |hp| {
+        hp.place_limit_order(ASK, t::mbtc(2_000), t::px(100_000), 0, option::none(), false, option::none());
+    });
+    session!(sc, fx, t::taker(), false, false, |hp| {
+        hp.place_market_order(BID, t::mbtc(1_700), false);
+    });
+}
+
+#[test]
+fun the_haircut_liquidates_a_position_the_raw_collateral_would_keep() {
+    let (mut sc, mut fx) = t::setup();
+    set_haircut(&mut sc, &fx);
+    open_long_under_haircut(&mut sc, &fx);
+    // At 93,500 the position has lost 11,050. Raw, 19,915 - 11,050 = 8,865 clears the 7,947.5
+    // of maintenance margin; haircut, 17,923.5 - 11,050 = 6,873.5 does not.
+    move_price(&mut sc, &mut fx, 93_500);
+    let haircut = ifixed::ifixed::from_u64fraction(10, 100);
+    let liqee = t::account_id(&fx, t::taker());
+    let mut expected_size = 0;
+    with_ch!(&mut sc, &fx, |ch| {
+        let position = ch.position(liqee);
+        let (margin, min_margin) = position.compute_margin_and_requirement(t::one(), t::usd(93_500), t::mmr(), haircut);
+        assert!(ifixed::ifixed::less_than(margin, min_margin));
+        let (raw_margin, _) = position.compute_margin_and_requirement(t::one(), t::usd(93_500), t::mmr(), 0);
+        assert!(ifixed::ifixed::greater_than_eq(raw_margin, min_margin));
+        // The size the haircut formula asks for, clipped to lots.
+        let (size, cancel_only) = perpetuals::clearing_house::compute_liquidation_size_and_mode(
+            position, t::one(), t::usd(93_500), t::imr(), t::liq_fee(), t::if_fee(), haircut,
+        );
+        assert!(!cancel_only);
+        let (base, _) = position.base_and_quote_amounts();
+        expected_size = perpetuals::clearing_house::clip_size_to_liquidate(size, base, t::lot());
+    });
+    let summary = liquidate(&mut sc, &fx);
+    assert!((summary.liquidated_size() as u128) == expected_size);
+    assert!(summary.liquidation_bad_debt() == 0);
+    with_ch!(&mut sc, &fx, |ch| {
+        // A partial liquidation that leaves the haircut margin at or above the initial
+        // requirement.
+        let position = ch.position(liqee);
+        let (base, _) = position.base_and_quote_amounts();
+        assert!(ifixed::ifixed::greater_than(base, 0) && ifixed::ifixed::less_than(base, base(1_700)));
+        let (margin, min_margin) = position.compute_margin_and_requirement(t::one(), t::usd(93_500), t::imr(), haircut);
+        assert!(ifixed::ifixed::greater_than_eq(margin, min_margin));
+    });
+    t::finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = 38, location = perpetuals::clearing_house)]
+fun without_the_haircut_the_same_position_is_healthy() {
+    let (mut sc, mut fx) = t::setup();
+    open_long_under_haircut(&mut sc, &fx);
+    move_price(&mut sc, &mut fx, 93_500);
+    liquidate(&mut sc, &fx);
+    t::finish(sc, fx);
+}
+
+// === Settlement with bad debt ===
+
+/// Closes the market and enables settlement at 80,000, where the taker's long is 18,095 under
+/// water.
+fun settle_at_80_000(sc: &mut haneul::test_scenario::Scenario, fx: &t::Fx) {
+    with_market!(sc, fx, t::maker(), |ch, _account, _btc, _tusd, registry| {
+        ch.close_market(t::perp_vk(fx), registry, t::clock(fx));
+        ch.set_settlement_prices(t::perp_vk(fx), registry, t::usd(80_000), t::one());
+        ch.enable_settlement(t::perp_vk(fx), registry);
+    });
+}
+
+#[test, expected_failure(abort_code = 31, location = perpetuals::clearing_house)]
+fun settlement_bad_debt_needs_the_insurance_fund() {
+    let (mut sc, fx) = t::setup();
+    open_levered_long(&mut sc, &fx);
+    settle_at_80_000(&mut sc, &fx);
+    with_market!(&mut sc, &fx, t::taker(), |ch, account, _btc, _tusd, _registry| {
+        ch.close_position_at_settlement_prices(account, &vector[]);
+    });
+    t::finish(sc, fx);
+}
+
+#[test]
+fun settlement_bad_debt_is_paid_by_the_insurance_fund() {
+    let (mut sc, fx) = t::setup();
+    open_levered_long(&mut sc, &fx);
+    with_market!(&mut sc, &fx, t::maker(), |ch, _account, _btc, _tusd, _registry| {
+        ch.donate_to_insurance_fund(coin::mint_for_testing<TUSD>(20_000 * t::tusd_unit(), sc.ctx()), sc.ctx());
+    });
+    settle_at_80_000(&mut sc, &fx);
+    with_market!(&mut sc, &fx, t::taker(), |ch, account, _btc, _tusd, _registry| {
+        ch.close_position_at_settlement_prices(account, &vector[]);
+        // Nothing comes back to the account; the 18,095 shortfall leaves the fund.
+        assert!(account.collateral_balance() == 80_000 * t::tusd_unit());
+        let (_, insurance) = ch.collateral_and_insurance_fund_balances();
+        assert!(insurance == (20_000 - 18_095) * t::tusd_unit());
+        let (collateral, base, _, _, _, _) = t::position_of(ch, t::account_id(&fx, t::taker()));
+        assert!(collateral == 0 && base == 0);
+    });
+    t::finish(sc, fx);
+}
+
 // === Auto-deleveraging ===
 
 fun adl_cap(sc: &mut haneul::test_scenario::Scenario, fx: &t::Fx): authority_cap::authority::AuthorityCap<perpetuals::authority::PACKAGE, perpetuals::authority::ADL> {
@@ -236,6 +351,57 @@ fun adl_closes_a_bad_debt_position_against_a_counterparty() {
         let (collateral, base, quote, _, _, _) = t::position_of(ch, t::account_id(&fx, t::maker()));
         assert!(base == 0 && quote == 0);
         assert!(collateral == t::usd(500_000) - t::usd(38) + t::usd(38_000) - t::usd(18_095));
+        assert!(ch.market_state().open_interest() == 0);
+    });
+    transfer::public_transfer(cap, @0x0);
+    t::finish(sc, fx);
+}
+
+#[test]
+fun adl_splits_the_bad_debt_across_counterparties_by_weight() {
+    let (mut sc, mut fx) = t::setup();
+    // Two shorts: the maker 1.0 and the liquidator 0.9, both filled by the taker's 1.9 buy.
+    session!(&mut sc, &fx, t::maker(), false, false, |hp| {
+        hp.place_limit_order(ASK, t::mbtc(1_000), t::px(100_000), 0, option::none(), false, option::none());
+    });
+    session!(&mut sc, &fx, t::liquidator(), false, false, |hp| {
+        hp.place_limit_order(ASK, t::mbtc(1_000), t::px(100_000), 0, option::none(), false, option::none());
+    });
+    session!(&mut sc, &fx, t::taker(), false, false, |hp| {
+        hp.place_market_order(BID, t::mbtc(1_900), false);
+    });
+    move_price(&mut sc, &mut fx, 80_000);
+    let cap = adl_cap(&mut sc, &fx);
+    let (liqee, maker, liquidator) = (
+        t::account_id(&fx, t::taker()), t::account_id(&fx, t::maker()), t::account_id(&fx, t::liquidator()),
+    );
+    let third = t::one() / 3;
+    with_market!(&mut sc, &fx, t::maker(), |ch, _account, btc, tusd, registry| {
+        adl::execute_adl(
+            ch, &cap, registry, liqee, vector[], vector[maker, liquidator],
+            vector[t::mbtc(1_000), t::mbtc(900)], vector[((t::one() - third) as u64), (third as u64)],
+            btc, tusd, t::clock(&fx),
+        );
+    });
+    with_ch!(&mut sc, &fx, |ch| {
+        let bad_debt = ifixed::ifixed::neg(t::usd(18_095));
+        // The last counterparty takes its weighted share, rounded away from zero by the
+        // fixed-point multiply; the first absorbs whatever is left, so the shares sum exactly.
+        let liquidator_share = ifixed::ifixed::mul(bad_debt, third);
+        let maker_share = ifixed::ifixed::sub(bad_debt, liquidator_share);
+        assert!(ifixed::ifixed::add(maker_share, liquidator_share) == bad_debt);
+        assert!(ifixed::ifixed::less_than(liquidator_share, ifixed::ifixed::neg(t::usd(6_031))));
+        assert!(ifixed::ifixed::greater_than(liquidator_share, ifixed::ifixed::neg(t::usd(6_032))));
+        // Maker: 500,000 less its 20 of fees, plus 20,000 from closing 1.0 short at 80,000.
+        let (collateral, base, _, _, _, _) = t::position_of(ch, maker);
+        assert!(base == 0);
+        assert!(collateral == ifixed::ifixed::add(t::usd(500_000) - t::usd(20) + t::usd(20_000), maker_share));
+        // Liquidator: 100,000 less 18 of fees, plus 18,000 from closing 0.9 short.
+        let (collateral, base, _, _, _, _) = t::position_of(ch, liquidator);
+        assert!(base == 0);
+        assert!(collateral == ifixed::ifixed::add(t::usd(100_000) - t::usd(18) + t::usd(18_000), liquidator_share));
+        let (collateral, base, _, _, _, _) = t::position_of(ch, liqee);
+        assert!(base == 0 && collateral == 0);
         assert!(ch.market_state().open_interest() == 0);
     });
     transfer::public_transfer(cap, @0x0);

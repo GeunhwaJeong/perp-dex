@@ -66,6 +66,31 @@ fun the_premium_is_capped_at_the_max_funding_rate() {
 }
 
 #[test]
+fun missed_intervals_are_caught_up_three_at_a_time() {
+    let (mut sc, mut fx) = t::setup();
+    lean_book_above_index(&mut sc, &fx);
+    sample_after_a_minute(&mut sc, &mut fx);
+    sample_after_a_minute(&mut sc, &mut fx);
+    // Ten funding intervals pass without a crank.
+    t::set_price(&mut sc, &mut fx, 100_000, 600_000);
+    with_market!(&mut sc, &fx, t::maker(), |ch, _account, btc, _tusd, _registry| {
+        let last_update = ch.market_state().funding_last_upd_ms();
+        ch.update_funding(btc, fx.clock());
+        let now = fx.clock().timestamp_ms();
+        assert!(ch.market_state().funding_last_upd_ms() == now);
+        // Only three of the twelve elapsed intervals are charged, at the premium TWAP the
+        // update sampled.
+        let premium = ch.market_state().premium_twap();
+        let (long_rate, _) = ch.market_state().cum_funding_rates();
+        let three_intervals = perpetuals::market::funding_period_adjustment(now, last_update, 60_000, 21_600_000);
+        assert!(three_intervals == ifixed::from_u64fraction(3 * 60_000, 21_600_000));
+        assert!(long_rate == ifixed::mul(premium, three_intervals));
+        assert!(ifixed::less_than(long_rate, ifixed::mul(premium, ifixed::from_u64fraction(12 * 60_000, 21_600_000))));
+    });
+    t::finish(sc, fx);
+}
+
+#[test]
 fun the_cap_binds_a_book_below_the_index_as_well() {
     let (mut sc, mut fx) = t::setup();
     // Mid 97,500: a -2.5% premium, capped at -500.
