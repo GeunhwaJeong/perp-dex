@@ -359,3 +359,51 @@ public(package) fun validate_session_integrator_info<T>(
     assert!(integrator_info.integrator_fee <= max_integrator_fee, EInvalidIntegratorFee);
     integrator_info.integrator_id
 }
+
+// === Extension fields ===
+
+// An authorized extension keeps its own per-account state under keys namespaced by its witness
+// type, so extensions cannot read or overwrite each other's fields and the account struct stays
+// unchanged.
+
+public fun add_extension_field_as_extension<T, W: drop, K: copy + drop + store, V: store>(
+    account: &mut Account<T>,
+    _: &W,
+    registry: &Registry,
+    key: K,
+    value: V,
+) {
+    registry.assert_extension_authorized<W>();
+    dynamic_field::add(&mut account.id, keys::extension_field<W, K>(key), value)
+}
+
+public fun remove_extension_field_as_extension<T, W: drop, K: copy + drop + store, V: store>(
+    account: &mut Account<T>,
+    _: &W,
+    registry: &Registry,
+    key: K,
+): V {
+    registry.assert_extension_authorized<W>();
+    dynamic_field::remove(&mut account.id, keys::extension_field<W, K>(key))
+}
+
+public fun borrow_mut_extension_field_as_extension<T, W: drop, K: copy + drop + store, V: store>(
+    account: &mut Account<T>,
+    _: &W,
+    registry: &Registry,
+    key: K,
+): &mut V {
+    registry.assert_extension_authorized<W>();
+    dynamic_field::borrow_mut(&mut account.id, keys::extension_field<W, K>(key))
+}
+
+public fun has_extension_field<T, W: drop, K: copy + drop + store>(account: &Account<T>, key: K): bool {
+    dynamic_field::exists(&account.id, keys::extension_field<W, K>(key))
+}
+
+public fun borrow_extension_field<T, W: drop, K: copy + drop + store, V: store>(
+    account: &Account<T>,
+    key: K,
+): &V {
+    dynamic_field::borrow(&account.id, keys::extension_field<W, K>(key))
+}

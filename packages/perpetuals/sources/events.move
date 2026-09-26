@@ -250,6 +250,14 @@ public struct SetFeeParams has copy, drop {
     priority_taker_fee: Option<u256>,
 }
 
+public struct SetFeeMultiplier has copy, drop {
+    ch_id: ID,
+    account_id: u64,
+    taker_multiplier: u256,
+    maker_multiplier: u256,
+    expires_ms: u64,
+}
+
 public struct SetTwapParams has copy, drop {
     ch_id: ID,
     funding_frequency_ms: u64,
@@ -796,6 +804,17 @@ public(package) fun created_position(
 /// Emits `UpdatedMarginRatios`.
 public(package) fun updated_margin_ratios(ch_id: ID, margin_ratio_initial: u256, margin_ratio_maintenance: u256) {
     event::emit(UpdatedMarginRatios { ch_id, margin_ratio_initial, margin_ratio_maintenance })
+}
+
+/// Emits `SetFeeMultiplier`.
+public(package) fun set_fee_multiplier(
+    ch_id: ID,
+    account_id: u64,
+    taker_multiplier: u256,
+    maker_multiplier: u256,
+    expires_ms: u64,
+) {
+    event::emit(SetFeeMultiplier { ch_id, account_id, taker_multiplier, maker_multiplier, expires_ms })
 }
 
 /// Emits `SetFeeParams`.

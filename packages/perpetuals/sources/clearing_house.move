@@ -92,6 +92,7 @@ const EInvalidResumeVersion: u64 = 56;
 const EBelowMmrCannotRestOrder: u64 = 57;
 const EInvalidOrderPrice: u64 = 3900;
 const EOrderNotFound: u64 = 58;
+const EInvalidFeeMultiplier: u64 = 59;
 
 // === Types ===
 
@@ -122,6 +123,15 @@ public struct SettlementPrices has store {
 }
 
 public struct Executor has drop { sender: address, domain: Option<address> }
+
+/// An account's cached fee tier on one market: the taker and maker fees of its sessions are
+/// scaled by these ifixed multipliers (0 to 1, discounts only) until `expires_ms`. Written by
+/// an authorized extension that computes the tier; absent or expired means no discount.
+public struct FeeMultiplier has copy, drop, store {
+    taker: u256,
+    maker: u256,
+    expires_ms: u64,
+}
 
 public struct SessionHotPotato<phantom T> {
     clearing_house: ClearingHouse<T>,
@@ -1597,7 +1607,7 @@ public(package) fun end_session_<T>(
     let SessionHotPotato {
         mut clearing_house,
         account_id,
-        timestamp_ms: _,
+        timestamp_ms,
         collateral_price,
         mark_price,
         uses_priority_gas_price,
@@ -1614,6 +1624,7 @@ public(package) fun end_session_<T>(
         session_summary,
     } = hot_potato;
     let ch_id = clearing_house.id.to_inner();
+    let (taker_fee_multiplier, _) = fee_multipliers(&clearing_house.id, account_id, timestamp_ms);
     let has_maker_fills = !maker_events.is_empty();
     let is_liquidation = liqee_account_id.is_some();
     let has_activity = session_has_activity(&session_summary, &maker_events, &liqee_account_id);
@@ -1628,7 +1639,13 @@ public(package) fun end_session_<T>(
     let market_imr = market_params.margin_ratio_initial();
     let market_mmr = market_params.margin_ratio_maintenance();
     let collateral_haircut = market_params.collateral_haircut();
-    let taker_fee = market_params.taker_fee();
+    let taker_fee = {
+        let discounted = ifixed::mul_toward_zero(market_params.taker_fee(), taker_fee_multiplier);
+        let maker_fee = market_params.maker_fee();
+        // A market-level maker rebate stays covered by the taker fee it is matched against, so
+        // a discount can never push a session's total fees negative.
+        if (ifixed::is_neg(maker_fee)) ifixed::max(discounted, ifixed::abs(maker_fee)) else discounted
+    };
     let priority_taker_fee = market_params.priority_taker_fee();
     let max_pending_orders = market_params.max_pending_orders();
     let scaling_factor = market_params.scaling_factor();
@@ -2110,6 +2127,8 @@ fun process_fill_maker(
         expiration_timestamp_ms,
         integrator_info,
     ) = order.order_snapshot();
+    let (_, maker_fee_multiplier) = fee_multipliers(clearing_house_id, maker_account_id, timestamp_ms);
+    let maker_fee = ifixed::mul_toward_zero(maker_fee, maker_fee_multiplier);
     let maker_position = borrow_mut_position_from_id(clearing_house_id, maker_account_id);
     settle_position_funding_and_emit(
         maker_position,
@@ -3180,6 +3199,55 @@ public fun end_session_as_extension<T, W: drop>(
 ): (ClearingHouse<T>, SessionSummary) {
     registry.assert_extension_authorized<W>();
     end_session_(hot_potato, account, allocate_missing_margin, deallocate_free_collateral, allow_empty_session)
+}
+
+/// Caches `account_id`'s fee tier on this market (see `FeeMultiplier`). Multipliers are
+/// ifixed fractions in [0, 1]: an extension can discount fees, never raise them.
+public fun set_fee_multiplier_as_extension<T, W: drop>(
+    clearing_house: &mut ClearingHouse<T>,
+    _: &W,
+    registry: &Registry,
+    account_id: u64,
+    taker_multiplier: u256,
+    maker_multiplier: u256,
+    expires_ms: u64,
+) {
+    registry.assert_extension_authorized<W>();
+    assert_package_version(clearing_house);
+    assert!(is_fee_multiplier(taker_multiplier) && is_fee_multiplier(maker_multiplier), EInvalidFeeMultiplier);
+    let key = keys::fee_multiplier(account_id);
+    if (df::exists_with_type<_, FeeMultiplier>(&clearing_house.id, key)) {
+        let _: FeeMultiplier = df::remove(&mut clearing_house.id, key);
+    };
+    df::add(
+        &mut clearing_house.id,
+        key,
+        FeeMultiplier { taker: taker_multiplier, maker: maker_multiplier, expires_ms },
+    );
+    events::set_fee_multiplier(
+        clearing_house.id.to_inner(),
+        account_id,
+        taker_multiplier,
+        maker_multiplier,
+        expires_ms,
+    );
+}
+
+/// The (taker, maker) multipliers a session of `account_id` at `now_ms` would use.
+public fun fee_multiplier<T>(clearing_house: &ClearingHouse<T>, account_id: u64, now_ms: u64): (u256, u256) {
+    fee_multipliers(&clearing_house.id, account_id, now_ms)
+}
+
+fun is_fee_multiplier(multiplier: u256): bool {
+    !ifixed::is_neg(multiplier) && ifixed::less_than_eq(multiplier, ifixed::one())
+}
+
+fun fee_multipliers(ch_id: &UID, account_id: u64, now_ms: u64): (u256, u256) {
+    let key = keys::fee_multiplier(account_id);
+    if (!df::exists_with_type<_, FeeMultiplier>(ch_id, key)) return (ifixed::one(), ifixed::one());
+    let multiplier: &FeeMultiplier = df::borrow(ch_id, key);
+    if (now_ms >= multiplier.expires_ms) return (ifixed::one(), ifixed::one());
+    (multiplier.taker, multiplier.maker)
 }
 
 public fun deallocate_collateral_as_extension<T, W: drop>(

@@ -39,6 +39,11 @@ public struct FrozenVersionKey has copy, drop, store {}
 
 public struct AuthorizedExtensionKey<phantom W> has copy, drop, store {}
 
+public struct FeeMultiplierKey has copy, drop, store { account_id: u64 }
+
+/// Namespaces an extension's own fields on an account by its witness type.
+public struct ExtensionFieldKey<phantom W, K: copy + drop + store> has copy, drop, store { key: K }
+
 // === Functions ===
 
 public(package) fun registry_market_info(ch_id: ID): RegistryMarketInfoKey {
@@ -107,4 +112,12 @@ public(package) fun frozen_version(): FrozenVersionKey {
 
 public(package) fun authorized_extension<W>(): AuthorizedExtensionKey<W> {
     AuthorizedExtensionKey {}
+}
+
+public(package) fun fee_multiplier(account_id: u64): FeeMultiplierKey {
+    FeeMultiplierKey { account_id }
+}
+
+public(package) fun extension_field<W, K: copy + drop + store>(key: K): ExtensionFieldKey<W, K> {
+    ExtensionFieldKey { key }
 }
