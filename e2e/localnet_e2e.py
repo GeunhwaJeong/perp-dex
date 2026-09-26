@@ -1682,9 +1682,11 @@ def main():
     cmds += u256_vec([MAKER_FEE, 15 * 10**13, 10**14], "vmaker")
     cmds += u64_vec(stake_tiers, "smin")
     cmds += u256_vec([ONE // 20, ONE // 10, ONE * 2 // 5], "sdisc")
-    # Makers with half of a market's maker volume get a 0.001% rebate, with 90% a 0.002% one.
+    # Makers with half of a market's maker volume and $5,000 of their own get a 0.001% rebate,
+    # with 90% and $15,000 a 0.002% one.
     REBATE_1, REBATE_2 = (1 << 256) - 10**13, (1 << 256) - 2 * 10**13
     cmds += u256_vec([ONE // 2, ONE * 9 // 10], "shmin")
+    cmds += u256_vec([fx(5_000), fx(15_000)], "shvol")
     cmds += u256_vec([REBATE_1, REBATE_2], "shfee")
     cmds += call(
         f"{FEES}::config::set_schedule",
@@ -1699,6 +1701,7 @@ def main():
         "smin",
         "sdisc",
         "shmin",
+        "shvol",
         "shfee",
         u64(86_400_000),
         u64(14),
@@ -1723,6 +1726,19 @@ def main():
     )
     minted += 50_000 * TUSD_UNIT
     ptb("T funds a position on the second market", cmds)
+    # T's owner registers itself as the account's tier address: its stake prices every session
+    # of the account from now on, whichever key signs it.
+    j = ptb(
+        "T registers the signing address as its tier address",
+        call(f"{FEES}::fees::set_tier_address", [TUSD], obj(a_t["obj"]), obj(a_t["cap"]), obj(registry)),
+    )
+    tier_set = events(j, "::fees::TierAddressSet")
+    check("tier address registered", len(tier_set) == 1)
+    ptb(
+        "a foreign cap cannot register a tier address",
+        call(f"{FEES}::fees::set_tier_address", [TUSD], obj(a_t["obj"]), obj(acct["M"]["cap"]), obj(registry)),
+        expect_abort=("account", 4000),
+    )
     session("M posts three asks on the second market", "M", [limit(ASK, size01, px(101_100 + 100 * i)) for i in range(3)], market=ch2)
 
     def fees_session(label, who, actions, market):
@@ -1785,7 +1801,16 @@ def main():
     ta = events(j, "::fees::TierApplied")[0]
     eq("the session's notional is recorded as volume", int(ta["volume"]), q_a)
     eq("tier 0 without stake caches a multiplier of one", int(ta["taker_multiplier"]), ONE, fmt=str)
+    check("the tier is priced by the registered address", ta["tier_address"] == tier_set[0]["tier_address"] == ta["sender"])
     check("the core emitted the cached multiplier", len(events(j, "::events::SetFeeMultiplier")) == 1)
+
+    # M is the market's only maker, but a share only earns a rebate on top of the tier's volume
+    # floor: one fill of about $10,110 reaches the first tier's $5,000, not the second's $15,000.
+    j = refresh_tier("M refreshes its tier after one fill", "M")
+    ta = events(j, "::fees::TierApplied")[0]
+    eq("M holds the market's whole maker volume after one fill", int(ta["maker_share"]), ONE, fmt=str)
+    eq("M's maker volume on the market is that fill", int(ta["maker_volume"]), q_a)
+    eq("the whole share on one fill reaches only the first rebate tier: multiplier -0.05", signed(ta["maker_multiplier"]), -(ONE // 20), fmt=str)
 
     # Stake 100 HANEUL with the first validator and deposit the StakedHaneul into the registry.
     validator = json.loads(
@@ -1832,12 +1857,13 @@ def main():
     eq("the principal counts again", int(events(j, "::registry::WithdrawalCanceled")[0]["active_after"]), 100 * HANEUL_UNIT, fmt=str)
 
     # The maker's side: both fills were credited on the market while M was not in the
-    # transaction; M's refresh sweeps them into its account window and, as the market's only
-    # maker so far, earns the top rebate tier.
+    # transaction; M's refresh sweeps the second into its account window too and, as the
+    # market's only maker with $15,000 behind it now, earns the top rebate tier.
     j = refresh_tier("M refreshes its tier on the second market", "M")
     ta = events(j, "::fees::TierApplied")[0]
     eq("M's maker volume swept into its window", int(ta["volume"]), q_a + q_b)
     eq("M holds the market's whole maker volume", int(ta["maker_share"]), ONE, fmt=str)
+    eq("M's maker volume on the market passes the second floor", int(ta["maker_volume"]), q_a + q_b)
     eq("0.002% rebate over the 0.02% maker fee: multiplier -0.1", signed(ta["maker_multiplier"]), -(ONE // 10), fmt=str)
     j = fees_session("T market-buys 0.1 BTC against the rebated maker", "T", [market_order(BID, size01)], ch2)
     ft = events(j, "::events::FilledTakerOrder")[0]
