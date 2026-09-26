@@ -125,8 +125,10 @@ public struct SettlementPrices has store {
 public struct Executor has drop { sender: address, domain: Option<address> }
 
 /// An account's cached fee tier on one market: the taker and maker fees of its sessions are
-/// scaled by these ifixed multipliers (0 to 1, discounts only) until `expires_ms`. Written by
-/// an authorized extension that computes the tier; absent or expired means no discount.
+/// scaled by these ifixed multipliers until `expires_ms`. The taker multiplier is a discount
+/// (0 to 1); the maker multiplier may go negative (-1 to 1) for a rebate, which every fill caps
+/// at the taker's own discounted rate so a fill's fees never sum below zero. Written by an
+/// authorized extension that computes the tier; absent or expired means the market rate.
 public struct FeeMultiplier has copy, drop, store {
     taker: u256,
     maker: u256,
@@ -168,6 +170,12 @@ public struct LiquidationOutcome has copy, drop {
     open_interest_delta: u256,
 }
 
+/// One maker fill of a session: who made and the quote notional, for volume accounting.
+public struct MakerFill has copy, drop {
+    account_id: u64,
+    quote: u256,
+}
+
 public struct SessionSummary has copy, drop {
     base_filled_ask: u256,
     base_filled_bid: u256,
@@ -180,6 +188,7 @@ public struct SessionSummary has copy, drop {
     quote_liquidated: u256,
     is_liqee_long: bool,
     bad_debt: u256,
+    maker_fills: vector<MakerFill>,
 }
 
 // === Functions ===
@@ -457,6 +466,15 @@ public fun summary<T>(
     &session.session_summary
 }
 
+/// The session's maker fills in matching order (at most the matching cap).
+public fun maker_fills(session_summary: &SessionSummary): &vector<MakerFill> {
+    &session_summary.maker_fills
+}
+
+public fun maker_fill_account_id(fill: &MakerFill): u64 { fill.account_id }
+
+public fun maker_fill_quote(fill: &MakerFill): u256 { fill.quote }
+
 fun session_has_activity(
     session_summary: &SessionSummary,
     maker_events: &vector<FilledMakerOrder>,
@@ -556,6 +574,7 @@ fun create_session_summary(): SessionSummary {
         quote_liquidated: 0,
         is_liqee_long: true,
         bad_debt: 0,
+        maker_fills: vector[],
     }
 }
 
@@ -1639,13 +1658,7 @@ public(package) fun end_session_<T>(
     let market_imr = market_params.margin_ratio_initial();
     let market_mmr = market_params.margin_ratio_maintenance();
     let collateral_haircut = market_params.collateral_haircut();
-    let taker_fee = {
-        let discounted = ifixed::mul_toward_zero(market_params.taker_fee(), taker_fee_multiplier);
-        let maker_fee = market_params.maker_fee();
-        // A market-level maker rebate stays covered by the taker fee it is matched against, so
-        // a discount can never push a session's total fees negative.
-        if (ifixed::is_neg(maker_fee)) ifixed::max(discounted, ifixed::abs(maker_fee)) else discounted
-    };
+    let taker_fee = ifixed::mul_toward_zero(market_params.taker_fee(), taker_fee_multiplier);
     let priority_taker_fee = market_params.priority_taker_fee();
     let max_pending_orders = market_params.max_pending_orders();
     let scaling_factor = market_params.scaling_factor();
@@ -1984,6 +1997,13 @@ fun match_taker<T>(
     let market_params = &hot_potato.clearing_house.market_params;
     let market_state = &hot_potato.clearing_house.market_state;
     let maker_fee = market_params.maker_fee();
+    // A maker rebate is paid out of the taker fee on the same fill, so it is capped at the
+    // taker's own discounted rate; this also covers a market whose maker fee is negative.
+    let min_maker_fee = {
+        let (taker_multiplier, _) =
+            fee_multipliers(&hot_potato.clearing_house.id, hot_potato.account_id, hot_potato.timestamp_ms);
+        ifixed::neg(ifixed::mul_toward_zero(market_params.taker_fee(), taker_multiplier))
+    };
     let (liquidation_fee, _) = market_params.liquidation_fee_rates();
     let collateral_haircut = market_params.collateral_haircut();
     let (funding_rate_long, funding_rate_short) = market_state.cum_funding_rates();
@@ -2044,6 +2064,7 @@ fun match_taker<T>(
                     collateral_price,
                     mark_price,
                     maker_fee,
+                    min_maker_fee,
                     liquidation_fee,
                     collateral_haircut,
                     funding_rate_long,
@@ -2107,6 +2128,7 @@ fun process_fill_maker(
     collateral_price: u256,
     mark_price: u256,
     maker_fee: u256,
+    min_maker_fee: u256,
     liquidation_fee: u256,
     collateral_haircut: u256,
     mkt_funding_rate_long: u256,
@@ -2128,7 +2150,7 @@ fun process_fill_maker(
         integrator_info,
     ) = order.order_snapshot();
     let (_, maker_fee_multiplier) = fee_multipliers(clearing_house_id, maker_account_id, timestamp_ms);
-    let maker_fee = ifixed::mul_toward_zero(maker_fee, maker_fee_multiplier);
+    let maker_fee = ifixed::max(ifixed::mul_toward_zero(maker_fee, maker_fee_multiplier), min_maker_fee);
     let maker_position = borrow_mut_position_from_id(clearing_house_id, maker_account_id);
     settle_position_funding_and_emit(
         maker_position,
@@ -2219,6 +2241,7 @@ fun process_fill_maker(
                 max_maker_abs_base,
             );
         if (applied) {
+            session_summary.maker_fills.push_back(MakerFill { account_id: maker_account_id, quote: ifixed::abs(quote_delta) });
             (
                 base_delta,
                 quote_delta,
@@ -3201,8 +3224,9 @@ public fun end_session_as_extension<T, W: drop>(
     end_session_(hot_potato, account, allocate_missing_margin, deallocate_free_collateral, allow_empty_session)
 }
 
-/// Caches `account_id`'s fee tier on this market (see `FeeMultiplier`). Multipliers are
-/// ifixed fractions in [0, 1]: an extension can discount fees, never raise them.
+/// Caches `account_id`'s fee tier on this market (see `FeeMultiplier`). The taker multiplier
+/// is an ifixed fraction in [0, 1] and the maker multiplier in [-1, 1]: an extension can
+/// discount fees or turn a maker fee into a rebate, never raise a fee.
 public fun set_fee_multiplier_as_extension<T, W: drop>(
     clearing_house: &mut ClearingHouse<T>,
     _: &W,
@@ -3214,7 +3238,7 @@ public fun set_fee_multiplier_as_extension<T, W: drop>(
 ) {
     registry.assert_extension_authorized<W>();
     assert_package_version(clearing_house);
-    assert!(is_fee_multiplier(taker_multiplier) && is_fee_multiplier(maker_multiplier), EInvalidFeeMultiplier);
+    assert!(is_discount(taker_multiplier) && is_maker_multiplier(maker_multiplier), EInvalidFeeMultiplier);
     let key = keys::fee_multiplier(account_id);
     if (df::exists_with_type<_, FeeMultiplier>(&clearing_house.id, key)) {
         let _: FeeMultiplier = df::remove(&mut clearing_house.id, key);
@@ -3238,8 +3262,12 @@ public fun fee_multiplier<T>(clearing_house: &ClearingHouse<T>, account_id: u64,
     fee_multipliers(&clearing_house.id, account_id, now_ms)
 }
 
-fun is_fee_multiplier(multiplier: u256): bool {
+fun is_discount(multiplier: u256): bool {
     !ifixed::is_neg(multiplier) && ifixed::less_than_eq(multiplier, ifixed::one())
+}
+
+fun is_maker_multiplier(multiplier: u256): bool {
+    ifixed::less_than_eq(ifixed::abs(multiplier), ifixed::one())
 }
 
 fun fee_multipliers(ch_id: &UID, account_id: u64, now_ms: u64): (u256, u256) {
@@ -3248,6 +3276,53 @@ fun fee_multipliers(ch_id: &UID, account_id: u64, now_ms: u64): (u256, u256) {
     let multiplier: &FeeMultiplier = df::borrow(ch_id, key);
     if (now_ms >= multiplier.expires_ms) return (ifixed::one(), ifixed::one());
     (multiplier.taker, multiplier.maker)
+}
+
+// Extension fields on a market, namespaced by the extension's witness type like the account
+// ones: per-account or per-market state an extension keeps where every session on the market
+// can reach it, such as maker volume credited while the maker's account is not in the
+// transaction.
+
+public fun add_extension_field_as_extension<T, W: drop, K: copy + drop + store, V: store>(
+    clearing_house: &mut ClearingHouse<T>,
+    _: &W,
+    registry: &Registry,
+    key: K,
+    value: V,
+) {
+    registry.assert_extension_authorized<W>();
+    df::add(&mut clearing_house.id, keys::extension_field<W, K>(key), value)
+}
+
+public fun remove_extension_field_as_extension<T, W: drop, K: copy + drop + store, V: store>(
+    clearing_house: &mut ClearingHouse<T>,
+    _: &W,
+    registry: &Registry,
+    key: K,
+): V {
+    registry.assert_extension_authorized<W>();
+    df::remove(&mut clearing_house.id, keys::extension_field<W, K>(key))
+}
+
+public fun borrow_mut_extension_field_as_extension<T, W: drop, K: copy + drop + store, V: store>(
+    clearing_house: &mut ClearingHouse<T>,
+    _: &W,
+    registry: &Registry,
+    key: K,
+): &mut V {
+    registry.assert_extension_authorized<W>();
+    df::borrow_mut(&mut clearing_house.id, keys::extension_field<W, K>(key))
+}
+
+public fun has_extension_field<T, W: drop, K: copy + drop + store>(clearing_house: &ClearingHouse<T>, key: K): bool {
+    df::exists(&clearing_house.id, keys::extension_field<W, K>(key))
+}
+
+public fun borrow_extension_field<T, W: drop, K: copy + drop + store, V: store>(
+    clearing_house: &ClearingHouse<T>,
+    key: K,
+): &V {
+    df::borrow(&clearing_house.id, keys::extension_field<W, K>(key))
 }
 
 public fun deallocate_collateral_as_extension<T, W: drop>(
