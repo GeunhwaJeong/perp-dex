@@ -31,6 +31,10 @@ public(package) fun source_cap(source: &Source<PYTH>): &SourceCap {
     source.borrow_source_cap(PYTH {})
 }
 
+public(package) fun witness(): PYTH {
+    PYTH {}
+}
+
 public fun authorize<ADMIN_OR_ASSISTANT>(
     source: &mut Source<PYTH>,
     config: &Config,

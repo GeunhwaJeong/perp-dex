@@ -117,6 +117,12 @@ public fun borrow_mut_id<SourceKey: drop>(
     &mut source.id
 }
 
+/// Read access to the source's fields needs no witness: an integration keeps its settings
+/// there and anyone may inspect them.
+public fun borrow_id<SourceKey>(source: &Source<SourceKey>): &UID {
+    &source.id
+}
+
 public fun assert_version<SourceKey>(
     source: &Source<SourceKey>,
     current_version: u64,

@@ -119,15 +119,30 @@ fun finish(sc: Scenario, fx: Fx) {
     sc.end();
 }
 
-/// A Pyth price object carrying `magnitude * 10^-expo_decimals` at `timestamp_s`.
+/// A Pyth price object carrying `magnitude * 10^-expo_decimals` at `timestamp_s`, with a zero
+/// confidence interval.
 fun pyth_object(sc: &mut Scenario, magnitude: u64, negative: bool, expo_decimals: u64, timestamp_s: u64): PriceInfoObject {
-    let p = price::new(i64::new(magnitude, negative), 0, i64::new(expo_decimals, expo_decimals != 0), timestamp_s);
+    pyth_object_with_conf(sc, magnitude, negative, expo_decimals, 0, timestamp_s)
+}
+
+/// A Pyth price object with a confidence interval of `conf` at the price's exponent.
+fun pyth_object_with_conf(sc: &mut Scenario, magnitude: u64, negative: bool, expo_decimals: u64, conf: u64, timestamp_s: u64): PriceInfoObject {
+    let p = price::new(i64::new(magnitude, negative), conf, i64::new(expo_decimals, expo_decimals != 0), timestamp_s);
     let feed = price_feed::new(
         price_identifier::from_byte_vec(x"e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43"),
         p,
         p,
     );
     price_info::new_price_info_object_for_test(price_info::new_price_info(timestamp_s, timestamp_s, feed), sc.ctx())
+}
+
+/// Sets the fixture source's confidence bound with the package admin cap.
+fun set_confidence_bound(sc: &mut Scenario, fx: &mut Fx, bps: u64) {
+    sc.next_tx(fx.admin);
+    let oconfig = sc.take_shared<OracleConfig>();
+    let Fx { source, oracle_admin, .. } = fx;
+    adapter::set_max_confidence_bps<ADMIN>(source, &oconfig, oracle_admin, bps);
+    ts::return_shared(oconfig);
 }
 
 /// Deauthorizes the fixture's source with the package admin cap.
@@ -200,6 +215,76 @@ fun an_unauthorized_source_cannot_create_feeds() {
         adapter::new_price_feed<VK, ADMIN>(&fx.source, &fx.oracle_vk, config, pfs, &obj, 60_000);
     });
     price_info::destroy(obj);
+    finish(sc, fx);
+}
+
+// === Confidence interval ===
+
+#[test]
+fun a_confidence_interval_within_the_bound_is_accepted() {
+    let (mut sc, fx) = setup();
+    assert!(adapter::max_confidence_bps(&fx.source) == 100);
+    // Exactly 1% of 65,000 at expo -8: the default bound is inclusive.
+    let obj = pyth_object_with_conf(&mut sc, 6_500_000_000_000, false, 8, 65_000_000_000, 1_700_000_000);
+    let source_id = fx.source.source_id();
+    with_storage!(&mut sc, &fx, |config, pfs| {
+        adapter::new_price_feed<VK, ADMIN>(&fx.source, &fx.oracle_vk, config, pfs, &obj, 60_000);
+        let (price, _) = pfs.price_feed(source_id).price_and_timestamp_ms();
+        assert!(price == (65_000 * ONE as u128));
+    });
+    price_info::destroy(obj);
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = adapter::EConfidenceTooWide)]
+fun a_wide_confidence_interval_is_refused_on_creation() {
+    let (mut sc, fx) = setup();
+    // One unit over 1%.
+    let obj = pyth_object_with_conf(&mut sc, 6_500_000_000_000, false, 8, 65_000_000_001, 1_700_000_000);
+    with_storage!(&mut sc, &fx, |config, pfs| {
+        adapter::new_price_feed<VK, ADMIN>(&fx.source, &fx.oracle_vk, config, pfs, &obj, 60_000);
+    });
+    price_info::destroy(obj);
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = adapter::EConfidenceTooWide)]
+fun a_wide_confidence_interval_is_refused_on_update() {
+    let (mut sc, fx) = setup();
+    let obj = pyth_object(&mut sc, 6_500_000_000_000, false, 8, 1_700_000_000);
+    // The interval is checked before the feed's binding to its object, so a second object
+    // with a 2% interval is refused for that reason.
+    let wide = pyth_object_with_conf(&mut sc, 6_500_000_000_000, false, 8, 130_000_000_000, 1_700_000_100);
+    with_storage!(&mut sc, &fx, |config, pfs| {
+        adapter::new_price_feed<VK, ADMIN>(&fx.source, &fx.oracle_vk, config, pfs, &obj, 60_000);
+        adapter::update_price_feed(&fx.source, config, pfs, &wide);
+    });
+    price_info::destroy(obj);
+    price_info::destroy(wide);
+    finish(sc, fx);
+}
+
+#[test]
+fun the_confidence_bound_is_a_package_admin_setting() {
+    let (mut sc, mut fx) = setup();
+    set_confidence_bound(&mut sc, &mut fx, 300);
+    assert!(adapter::max_confidence_bps(&fx.source) == 300);
+    // 2% now passes.
+    let obj = pyth_object_with_conf(&mut sc, 6_500_000_000_000, false, 8, 130_000_000_000, 1_700_000_000);
+    with_storage!(&mut sc, &fx, |config, pfs| {
+        adapter::new_price_feed<VK, ADMIN>(&fx.source, &fx.oracle_vk, config, pfs, &obj, 60_000);
+    });
+    // Tightening it again refuses the same interval on the next push.
+    set_confidence_bound(&mut sc, &mut fx, 100);
+    assert!(adapter::max_confidence_bps(&fx.source) == 100);
+    price_info::destroy(obj);
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = adapter::EInvalidConfidenceBound)]
+fun the_confidence_bound_cannot_exceed_the_price() {
+    let (mut sc, mut fx) = setup();
+    set_confidence_bound(&mut sc, &mut fx, 10_001);
     finish(sc, fx);
 }
 

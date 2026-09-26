@@ -98,7 +98,7 @@ Liquidations add the insurance fee share of every liquidated notional to it.
 
 | Operator | Calls | Why |
 |---|---|---|
-| Price pusher | `oracle_pyth::price_feed_storage::update_price_feed` | Freshness within the tolerance |
+| Price pusher | `oracle_pyth::price_feed_storage::update_price_feed` | Freshness within the tolerance. A push whose Pyth confidence interval exceeds the source's bound (`set_max_confidence_bps`, 1% by default) aborts and leaves the feed stale, so markets stop rather than trade on an uncertain price; the pusher retries on the next update |
 | Funding cranker | `clearing_house::update_funding` | Funding and premium TWAPs only advance when something touches the market |
 | Liquidator | `liquidate` inside a session | Positions below the maintenance margin |
 | ADL operator | `adl::execute_adl` | Negative-equity positions when socialization is off or exhausted |

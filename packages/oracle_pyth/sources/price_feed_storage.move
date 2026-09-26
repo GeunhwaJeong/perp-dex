@@ -4,15 +4,17 @@
 module oracle_aggregator_pyth_integration::price_feed_storage;
 
 use authority_cap::authority::{ADMIN, AuthorityCap};
+use haneul::dynamic_field;
 use oracle_aggregator::{
-    authority::{PACKAGE, VENDOR},
+    authority::{Self as oracle_authority, PACKAGE, VENDOR},
     config::Config,
     price_feed_storage::PriceFeedStorage,
     source::Source,
 };
-use oracle_aggregator_pyth_integration::source::PYTH;
+use oracle_aggregator_pyth_integration::source::{Self as pyth_source, PYTH};
 use pyth::{
     i64::I64,
+    price::Price,
     price_info::PriceInfoObject,
     pyth,
 };
@@ -30,6 +32,21 @@ const EUnsupportedExponent: vector<u8> =
 #[error(code = 1)]
 const EPriceOverflow: vector<u8> =
     b"Pyth integration: the normalized price does not fit into a u128.";
+#[error(code = 2)]
+const EConfidenceTooWide: vector<u8> =
+    b"Pyth integration: the price's confidence interval is wider than the source allows.";
+#[error(code = 3)]
+const EInvalidConfidenceBound: vector<u8> =
+    b"Pyth integration: the confidence bound is in basis points of the price, at most 10,000.";
+
+/// Widest confidence interval accepted until the package admin sets one: 1% of the price.
+const DEFAULT_MAX_CONFIDENCE_BPS: u64 = 100;
+const BPS: u128 = 10_000;
+
+// === Types ===
+
+/// The source's confidence bound, kept on the `Source<PYTH>` object.
+public struct MaxConfidenceBpsKey has copy, drop, store {}
 
 // === Functions ===
 
@@ -43,18 +60,7 @@ public fun new_price_feed<VendorKey, ADMIN_OR_ASSISTANT>(
 ) {
     source.assert_version();
     let pyth_price = pyth::get_price_unsafe(pyth_price_info);
-    // A negative Pyth price aborts in `get_magnitude_if_positive`.
-    let price = {
-        let pyth_price = pyth_price;
-        scaled_by_exponent(
-            pyth_price.get_price().get_magnitude_if_positive(),
-            pyth_price.get_expo(),
-        )
-    };
-    let timestamp_ms = {
-        let pyth_price = pyth_price;
-        pyth_price.get_timestamp() * 1000
-    };
+    let (price, timestamp_ms) = accepted_price(source, &pyth_price);
     price_feed_storage.new_price_feed(
         cap,
         config,
@@ -74,18 +80,7 @@ public fun update_price_feed(
 ) {
     source.assert_version();
     let pyth_price = pyth::get_price_unsafe(pyth_price_info);
-    // A negative Pyth price aborts in `get_magnitude_if_positive`.
-    let price = {
-        let pyth_price = pyth_price;
-        scaled_by_exponent(
-            pyth_price.get_price().get_magnitude_if_positive(),
-            pyth_price.get_expo(),
-        )
-    };
-    let timestamp_ms = {
-        let pyth_price = pyth_price;
-        pyth_price.get_timestamp() * 1000
-    };
+    let (price, timestamp_ms) = accepted_price(source, &pyth_price);
     price_feed_storage.update_price_feed(
         config,
         source.source_cap(),
@@ -124,6 +119,52 @@ public fun force_remove_price_feed<ADMIN_OR_ASSISTANT>(
 ) {
     source.assert_version();
     price_feed_storage.force_remove_price_feed(authority_cap, config, source.source_id())
+}
+
+/// Sets the widest confidence interval the source accepts, in basis points of the price. A
+/// price whose interval is wider is refused rather than written, leaving the feed stale so that
+/// markets stop on `EBadIndexPrice` instead of trading on an uncertain price.
+public fun set_max_confidence_bps<ADMIN_OR_ASSISTANT>(
+    source: &mut Source<PYTH>,
+    config: &Config,
+    cap: &AuthorityCap<PACKAGE, ADMIN_OR_ASSISTANT>,
+    max_confidence_bps: u64,
+) {
+    source.assert_version();
+    config.assert_package_version();
+    oracle_authority::assert_is_admin_or_assistant<ADMIN_OR_ASSISTANT>();
+    config.assert_package_authority_cap_is_valid(cap);
+    assert!(max_confidence_bps <= (BPS as u64), EInvalidConfidenceBound);
+    let id = source.borrow_mut_id(pyth_source::witness());
+    if (dynamic_field::exists(id, MaxConfidenceBpsKey {})) {
+        *dynamic_field::borrow_mut(id, MaxConfidenceBpsKey {}) = max_confidence_bps
+    } else {
+        dynamic_field::add(id, MaxConfidenceBpsKey {}, max_confidence_bps)
+    }
+}
+
+/// The source's confidence bound in basis points of the price.
+public fun max_confidence_bps(source: &Source<PYTH>): u64 {
+    let id = source.borrow_id();
+    if (!dynamic_field::exists(id, MaxConfidenceBpsKey {})) return DEFAULT_MAX_CONFIDENCE_BPS;
+    *dynamic_field::borrow(id, MaxConfidenceBpsKey {})
+}
+
+/// The 18-decimal price and millisecond timestamp of a Pyth price the source accepts: positive
+/// (a negative one aborts in `get_magnitude_if_positive`) and with a confidence interval within
+/// the source's bound. Price and interval share the exponent, so the bound is checked on the raw
+/// magnitudes.
+fun accepted_price(source: &Source<PYTH>, pyth_price: &Price): (u128, u64) {
+    let magnitude = pyth_price.get_price().get_magnitude_if_positive();
+    assert!(
+        (pyth_price.get_conf() as u128) * BPS
+            <= (magnitude as u128) * (max_confidence_bps(source) as u128),
+        EConfidenceTooWide,
+    );
+    (
+        scaled_by_exponent(magnitude, pyth_price.get_expo()),
+        pyth_price.get_timestamp() * 1000,
+    )
 }
 
 /// Converts a Pyth price `magnitude * 10^exponent` into an 18-decimal fixed-point `u128`.
