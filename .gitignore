@@ -10,7 +10,7 @@ Pub.*.toml
 /deps/bin/
 .DS_Store
 
-# From the framework checkout, only the two packages the engine builds against (and its license)
+# From the framework checkout, only the three packages the engine builds against (and its license)
 /deps/haneul-src/*
 !/deps/haneul-src/LICENSE
 !/deps/haneul-src/crates/
