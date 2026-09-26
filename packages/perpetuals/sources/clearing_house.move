@@ -90,6 +90,7 @@ const EStalePendingRepostRequiresInitialMargin: u64 = 54;
 const ENotFrozen: u64 = 55;
 const EInvalidResumeVersion: u64 = 56;
 const EBelowMmrCannotRestOrder: u64 = 57;
+// Out of sequence on purpose: the localnet suite and the front end match on this value.
 const EInvalidOrderPrice: u64 = 3900;
 const EOrderNotFound: u64 = 58;
 const EInvalidFeeMultiplier: u64 = 59;
@@ -1102,6 +1103,8 @@ public fun delete_margin_ratios_proposal<VendorKey, ADMIN_OR_ASSISTANT, T>(
     let MarginRatioProposal { .. } = df::remove(&mut clearing_house.id, key);
 }
 
+/// Takes no cap: the proposal was made by the vendor and its outcome is fixed, so anyone may
+/// apply it once it matures, and the vendor cannot hold a matured change back.
 public fun commit_margin_ratios_proposal<T>(
     clearing_house: &mut ClearingHouse<T>,
     clock: &Clock,
@@ -1172,6 +1175,8 @@ public fun update_twaps<T>(
     )
 }
 
+/// Takes no cap: settling funding only moves what the position already owes or is owed at the
+/// current cumulative rates, so anyone (a keeper, a counterparty) may bring an account current.
 public fun settle_position_funding<T>(
     clearing_house: &mut ClearingHouse<T>,
     oracle: &PriceFeedStorage,
@@ -1415,6 +1420,9 @@ public fun try_cancel_orders<T, ADMIN_OR_ASSISTANT>(
     try_cancel_orders_(clearing_house, account.account_id(), order_ids, option::none(), 0, 0)
 }
 
+/// Takes no cap: on a closed market every position settles at the same fixed prices and the
+/// proceeds go to the account object itself, so anyone may settle any account (and cancel its
+/// orders on the way), which lets a vendor wind a market down without every owner showing up.
 public fun close_position_at_settlement_prices<T>(
     clearing_house: &mut ClearingHouse<T>,
     account: &mut Account<T>,
