@@ -20,7 +20,8 @@ tickets cannot be created or executed, and fee multipliers cannot be cached, unt
 
 Then set the fee schedule (`perpetuals_fees::config::set_schedule` with the schedule admin cap):
 the reference base rates, the volume tiers as absolute rates at or below the base, the staking
-tiers as discounts, the multiplier lifetime and the volume window in epochs. Set the staking tier
+tiers as discounts, the maker-share tiers (a negative maker fee is a rebate, bounded by the
+smallest taker rate), the multiplier lifetime and the volume window in epochs. Set the staking tier
 thresholds and withdrawal delay on the `staking_tiers` registry (`registry::set_thresholds`,
 `registry::set_withdraw_delay_ms`). Markets whose rates differ from the base rates are discounted
 in proportion.
@@ -101,7 +102,7 @@ Liquidations add the insurance fee share of every liquidated notional to it.
 | ADL operator | `adl::execute_adl` | Negative-equity positions when socialization is off or exhausted |
 | Stale order sweeper (optional) | `try_cancel_stale_orders` with the maintenance cap | Expired and no-longer-reducing reduce-only orders |
 | Stop and TWAP executors | `perpetuals_orders::stop_orders::place_stop_order_*`, `perpetuals_orders::twap_orders::execute` | Conditional orders are executed by whoever the ticket names |
-| Fee tier front end (no operator) | `perpetuals_fees::fees::end_session` in place of `clearing_house::end_session`, `fees::refresh` after staking | Volume is only recorded and multipliers only cached through these calls; a session ended through the core pays the market rate |
+| Fee tier front end (no operator) | `perpetuals_fees::fees::end_session` in place of `clearing_house::end_session`, `fees::refresh` after staking or making | Volume is only recorded and multipliers only cached through these calls; a maker's credited volume reaches its tier on its next session or refresh on that market; a session ended through the core pays the market rate |
 
 Two calculations the operators must get right:
 
