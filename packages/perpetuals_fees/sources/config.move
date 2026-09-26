@@ -3,9 +3,9 @@
 
 /// The fee schedule: volume tiers give absolute taker and maker rates, staking tiers give a
 /// discount on top, and maker-share tiers turn the maker rate into a rebate for makers who
-/// provide a large share of a market's maker volume. The three combine into the multipliers the
-/// perpetuals core applies to a market's own rates. Rates are ifixed fractions of notional
-/// (0.045% is 0.00045 ifixed).
+/// provide a large share of a market's maker volume and at least a floor of maker volume of
+/// their own. The three combine into the multipliers the perpetuals core applies to a market's
+/// own rates. Rates are ifixed fractions of notional (0.045% is 0.00045 ifixed).
 ///
 /// The schedule is written against reference base rates. A tier's multiplier is its rate over
 /// the base rate, so a market that charges the base rates pays exactly the schedule; a market
@@ -32,6 +32,8 @@ const EInvalidTtl: u64 = 9;
 const EInvalidWindow: u64 = 10;
 const EShareTiersNotAscending: u64 = 11;
 const ERebateAboveTakerFee: u64 = 12;
+const EShareVolumeFloorsNotAscending: u64 = 13;
+const EShareTiersNeedBaseMakerFee: u64 = 14;
 
 // === Constants ===
 
@@ -49,7 +51,8 @@ public struct FeeSchedule has key {
     volume_tiers: vector<VolumeTier>,
     /// Ascending by `min_stake` and by `discount`.
     staking_tiers: vector<StakingTier>,
-    /// Ascending by `min_share`, non-increasing by `maker_fee` (a negative fee is a rebate).
+    /// Ascending by `min_share`, non-decreasing by `min_maker_volume`, non-increasing by
+    /// `maker_fee` (a negative fee is a rebate).
     share_tiers: vector<ShareTier>,
     /// How long a cached multiplier stays valid on a market.
     multiplier_ttl_ms: u64,
@@ -71,6 +74,10 @@ public struct StakingTier has copy, drop, store {
 public struct ShareTier has copy, drop, store {
     /// Ifixed fraction of a market's maker volume over the window.
     min_share: u256,
+    /// Maker volume (USD) the maker itself must have on the market over the window. On a new or
+    /// thin market one maker is trivially the whole market; the floor keeps such a share from
+    /// earning a rebate until the volume behind it is worth one.
+    min_maker_volume: u256,
     maker_fee: u256,
 }
 
@@ -120,6 +127,7 @@ public fun set_schedule(
     staking_min: vector<u64>,
     staking_discount: vector<u256>,
     share_min: vector<u256>,
+    share_min_volume: vector<u256>,
     share_maker_fee: vector<u256>,
     multiplier_ttl_ms: u64,
     window_epochs: u64,
@@ -131,6 +139,7 @@ public fun set_schedule(
         volume_min.length() == volume_taker_fee.length()
             && volume_min.length() == volume_maker_fee.length()
             && staking_min.length() == staking_discount.length()
+            && share_min.length() == share_min_volume.length()
             && share_min.length() == share_maker_fee.length(),
         ELengthMismatch,
     );
@@ -181,19 +190,30 @@ public fun set_schedule(
 
     // The smallest taker rate any account can pay bounds the largest rebate any maker can get.
     let min_effective_taker_fee = ifixed::mul_toward_zero(min_taker_fee, ifixed::sub(one, max_discount));
+    // A share tier's rate only reaches a fill as `rate / base_maker_fee`, so with a zero base
+    // the tiers could never apply; refuse them rather than keep dead configuration.
+    assert!(share_min.is_empty() || base_maker_fee != 0, EShareTiersNeedBaseMakerFee);
     let mut share_tiers = vector[];
     i = 0;
     while (i < share_min.length()) {
-        let (min_share, maker_fee) = (share_min[i], share_maker_fee[i]);
+        let (min_share, min_maker_volume, maker_fee) =
+            (share_min[i], share_min_volume[i], share_maker_fee[i]);
         assert!(!ifixed::is_neg(min_share) && min_share != 0 && ifixed::less_than_eq(min_share, one), EShareTiersNotAscending);
+        assert!(!ifixed::is_neg(min_maker_volume), EShareVolumeFloorsNotAscending);
         if (i > 0) {
             assert!(ifixed::less_than(share_min[i - 1], min_share), EShareTiersNotAscending);
+            // A higher share tier must not ask for less volume: the tiers stay a prefix
+            // (reaching tier `n` implies every tier below it), which `share_tier_index` counts on.
+            assert!(
+                ifixed::less_than_eq(share_min_volume[i - 1], min_maker_volume),
+                EShareVolumeFloorsNotAscending,
+            );
             assert!(ifixed::less_than_eq(maker_fee, share_maker_fee[i - 1]), EShareTiersNotAscending);
         };
         assert!(ifixed::less_than_eq(maker_fee, base_maker_fee), ETierFeeAboveBase);
         assert!(ifixed::less_than_eq(ifixed::abs(maker_fee), min_effective_taker_fee), ERebateAboveTakerFee);
-        assert!(ifixed::less_than_eq(ifixed::abs(maker_fee), base_maker_fee) || base_maker_fee == 0, ETierFeeAboveBase);
-        share_tiers.push_back(ShareTier { min_share, maker_fee });
+        assert!(ifixed::less_than_eq(ifixed::abs(maker_fee), base_maker_fee), ETierFeeAboveBase);
+        share_tiers.push_back(ShareTier { min_share, min_maker_volume, maker_fee });
         i = i + 1;
     };
 
@@ -223,16 +243,23 @@ entry fun migrate(schedule: &mut FeeSchedule, _: &AdminCap) {
 // === Views ===
 
 /// The (taker, maker) multipliers for an account with `volume` over the window, `stake`
-/// deposited and `share` of the market's maker volume. An unconfigured schedule yields the
-/// market rates. The staking discount applies to fees paid, never to a rebate.
-public fun multipliers(schedule: &FeeSchedule, volume: u256, stake: u64, share: u256): (u256, u256) {
+/// deposited, `share` of the market's maker volume and `maker_volume` of its own on that
+/// market. An unconfigured schedule yields the market rates. The staking discount applies to
+/// fees paid, never to a rebate.
+public fun multipliers(
+    schedule: &FeeSchedule,
+    volume: u256,
+    stake: u64,
+    share: u256,
+    maker_volume: u256,
+): (u256, u256) {
     let one = ifixed::one();
     if (schedule.volume_tiers.is_empty() || schedule.base_taker_fee == 0) return (one, one);
     let tier = &schedule.volume_tiers[schedule.volume_tier_index(volume)];
     let discount = schedule.staking_discount(stake);
     let keep = ifixed::sub(one, discount);
     let taker = rate_multiplier(ifixed::mul_toward_zero(tier.taker_fee, keep), schedule.base_taker_fee);
-    let share_count = schedule.share_tier_index(share);
+    let share_count = schedule.share_tier_index(share, maker_volume);
     let maker_rate = if (share_count > 0) {
         let share_fee = schedule.share_tiers[share_count - 1].maker_fee;
         if (ifixed::is_neg(share_fee)) share_fee else ifixed::mul_toward_zero(ifixed::min(share_fee, tier.maker_fee), keep)
@@ -260,10 +287,17 @@ public fun staking_tier_index(schedule: &FeeSchedule, stake: u64): u64 {
     count
 }
 
-/// Number of share tiers `share` reaches (0 below the first).
-public fun share_tier_index(schedule: &FeeSchedule, share: u256): u64 {
+/// Number of share tiers reached with `share` of a market's maker volume and `maker_volume`
+/// of one's own on it (0 below the first). Both thresholds ascend, so the reached tiers form a
+/// prefix and their count is the index of the highest one.
+public fun share_tier_index(schedule: &FeeSchedule, share: u256, maker_volume: u256): u64 {
     let mut count = 0;
-    schedule.share_tiers.do_ref!(|tier| if (ifixed::greater_than_eq(share, tier.min_share)) count = count + 1);
+    schedule.share_tiers.do_ref!(|tier| {
+        if (
+            ifixed::greater_than_eq(share, tier.min_share)
+                && ifixed::greater_than_eq(maker_volume, tier.min_maker_volume)
+        ) count = count + 1
+    });
     count
 }
 
@@ -292,7 +326,9 @@ public fun volume_tier_fields(tier: &VolumeTier): (u256, u256, u256) {
 
 public fun staking_tier_fields(tier: &StakingTier): (u64, u256) { (tier.min_stake, tier.discount) }
 
-public fun share_tier_fields(tier: &ShareTier): (u256, u256) { (tier.min_share, tier.maker_fee) }
+public fun share_tier_fields(tier: &ShareTier): (u256, u256, u256) {
+    (tier.min_share, tier.min_maker_volume, tier.maker_fee)
+}
 
 public(package) fun assert_version(schedule: &FeeSchedule) {
     assert!(schedule.version == VERSION, EWrongVersion)

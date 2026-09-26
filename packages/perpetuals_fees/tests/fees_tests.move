@@ -226,6 +226,37 @@ fun a_rebate_is_capped_at_the_takers_discounted_fee() {
     f::finish(sc, fx, ffx);
 }
 
+#[test]
+fun a_whole_market_share_below_the_volume_floor_earns_no_rebate() {
+    let (mut sc, fx, ffx) = f::setup();
+    t::ladder(&mut sc, &fx, 100_000);
+    // 0.04 BTC at 100,000: the maker is the whole market, on 4,000 of maker volume.
+    fees_session!(&mut sc, &fx, &ffx, t::taker(), |hp| {
+        hp.place_market_order(BID, t::mbtc(40), false);
+    });
+    f::refresh(&mut sc, &fx, &ffx, t::maker());
+    let maker_id = fx.account_id(t::maker());
+    with_market!(&mut sc, &fx, |ch| {
+        assert!(fees::maker_share(ch, maker_id, 0) == ONE);
+        assert!(fees::maker_volume(ch, maker_id, 0) == t::usd(4_000));
+    });
+    // Below the 5,000 floor the share is worth nothing: tier 0 maker rate, multiplier one.
+    let (_, maker) = f::multipliers_on_market(&mut sc, &fx, t::maker());
+    assert!(maker == ONE);
+    // Another 0.05 BTC (5,000, all at 100,000) makes 9,000: past the first floor, short of
+    // the second tier's 10,000.
+    fees_session!(&mut sc, &fx, &ffx, t::taker(), |hp| {
+        hp.place_market_order(BID, t::mbtc(50), false);
+    });
+    f::refresh(&mut sc, &fx, &ffx, t::maker());
+    with_market!(&mut sc, &fx, |ch| {
+        assert!(fees::maker_volume(ch, maker_id, 0) == t::usd(9_000));
+    });
+    let (_, maker) = f::multipliers_on_market(&mut sc, &fx, t::maker());
+    assert!(maker == neg(fraction(5, 100)));
+    f::finish(sc, fx, ffx);
+}
+
 // === Core guard rails ===
 
 #[test, expected_failure(abort_code = 5028, location = perpetuals::registry)]
@@ -291,23 +322,36 @@ fun multipliers_follow_volume_stake_and_share() {
     let (mut sc, fx, ffx) = f::setup();
     sc.next_tx(fx.admin());
     let schedule = sc.take_shared_by_id<perpetuals_fees::config::FeeSchedule>(ffx.schedule_id());
-    let (taker, maker) = schedule.multipliers(0, 0, 0);
+    let (taker, maker) = schedule.multipliers(0, 0, 0, 0);
     assert!(taker == ONE && maker == ONE);
-    let (taker, maker) = schedule.multipliers(t::usd(100_000), 0, 0);
+    let (taker, maker) = schedule.multipliers(t::usd(100_000), 0, 0, 0);
     assert!(taker == fraction(3, 5) && maker == fraction(1, 2));
-    let (taker, maker) = schedule.multipliers(t::usd(100_000), 10 * f::haneul(), 0);
+    let (taker, maker) = schedule.multipliers(t::usd(100_000), 10 * f::haneul(), 0, 0);
     // 0.03 less 5% over 0.05; 0.01 less 5% over 0.02.
     assert!(taker == fraction(57, 100) && maker == fraction(475, 1000));
-    // Half the market's maker volume: the 0.001% rebate replaces the maker rate, undiscounted.
-    let (taker, maker) = schedule.multipliers(t::usd(100_000), 1_000 * f::haneul(), pct(50));
+    // Half the market's maker volume on 5,000 of one's own: the 0.001% rebate replaces the
+    // maker rate, undiscounted.
+    let (taker, maker) = schedule.multipliers(t::usd(100_000), 1_000 * f::haneul(), pct(50), t::usd(5_000));
     assert!(taker == fraction(36, 100) && maker == neg(fraction(5, 100)));
-    let (_, maker) = schedule.multipliers(0, 0, pct(49));
+    let (_, maker) = schedule.multipliers(0, 0, pct(49), t::usd(100_000));
     assert!(maker == ONE);
+    // The share alone is not enough: below the floor the tier's rate stays the maker rate.
+    let (_, maker) = schedule.multipliers(0, 0, pct(90), t::usd(4_999));
+    assert!(maker == ONE);
+    // 90% of the market on 9,999 reaches the first tier's floor, not the second's.
+    let (_, maker) = schedule.multipliers(0, 0, pct(90), t::usd(9_999));
+    assert!(maker == neg(fraction(5, 100)));
+    let (_, maker) = schedule.multipliers(0, 0, pct(90), t::usd(10_000));
+    assert!(maker == neg(fraction(1, 10)));
     assert!(schedule.volume_tier_index(t::usd(19_999)) == 0);
     assert!(schedule.volume_tier_index(t::usd(20_000)) == 1);
     assert!(schedule.staking_tier_index(999 * f::haneul()) == 2);
     assert!(schedule.staking_discount(1_000 * f::haneul()) == pct(40));
-    assert!(schedule.share_tier_index(pct(90)) == 2);
+    assert!(schedule.share_tier_index(pct(90), t::usd(10_000)) == 2);
+    assert!(schedule.share_tier_index(pct(90), t::usd(9_999)) == 1);
+    assert!(schedule.share_tier_index(pct(90), 0) == 0);
+    let (min_share, min_maker_volume, maker_fee) = schedule.share_tiers()[1].share_tier_fields();
+    assert!(min_share == pct(90) && min_maker_volume == t::usd(10_000) && maker_fee == neg(bps(1) / 5));
     ts::return_shared(schedule);
     f::finish(sc, fx, ffx);
 }
@@ -319,7 +363,7 @@ fun a_tier_fee_above_the_base_is_rejected() {
     let mut schedule = sc.take_shared_by_id<perpetuals_fees::config::FeeSchedule>(ffx.schedule_id());
     schedule.set_schedule(
         ffx.schedule_cap(), bps(5), bps(2),
-        vector[0], vector[bps(6)], vector[bps(2)], vector[], vector[], vector[], vector[], 1, 14,
+        vector[0], vector[bps(6)], vector[bps(2)], vector[], vector[], vector[], vector[], vector[], 1, 14,
     );
     ts::return_shared(schedule);
     f::finish(sc, fx, ffx);
@@ -333,7 +377,7 @@ fun volume_tiers_must_ascend() {
     schedule.set_schedule(
         ffx.schedule_cap(), bps(5), bps(2),
         vector[0, t::usd(10), t::usd(10)], vector[bps(5), bps(4), bps(3)], vector[bps(2), bps(2), bps(2)],
-        vector[], vector[], vector[], vector[], 1, 14,
+        vector[], vector[], vector[], vector[], vector[], 1, 14,
     );
     ts::return_shared(schedule);
     f::finish(sc, fx, ffx);
@@ -347,7 +391,7 @@ fun staking_discounts_must_not_shrink_with_stake() {
     schedule.set_schedule(
         ffx.schedule_cap(), bps(5), bps(2),
         vector[0], vector[bps(5)], vector[bps(2)],
-        vector[1, 2], vector[pct(10), pct(5)], vector[], vector[], 1, 14,
+        vector[1, 2], vector[pct(10), pct(5)], vector[], vector[], vector[], 1, 14,
     );
     ts::return_shared(schedule);
     f::finish(sc, fx, ffx);
@@ -362,7 +406,38 @@ fun a_rebate_larger_than_the_smallest_taker_fee_is_rejected() {
     schedule.set_schedule(
         ffx.schedule_cap(), bps(5), bps(5),
         vector[0], vector[bps(5)], vector[bps(5)],
-        vector[1], vector[pct(40)], vector[pct(50)], vector[neg(bps(3) + bps(1) / 10)], 1, 14,
+        vector[1], vector[pct(40)], vector[pct(50)], vector[0], vector[neg(bps(3) + bps(1) / 10)], 1, 14,
+    );
+    ts::return_shared(schedule);
+    f::finish(sc, fx, ffx);
+}
+
+#[test, expected_failure(abort_code = 13, location = perpetuals_fees::config)]
+fun share_tier_volume_floors_must_not_shrink() {
+    let (mut sc, fx, ffx) = f::setup();
+    sc.next_tx(fx.admin());
+    let mut schedule = sc.take_shared_by_id<perpetuals_fees::config::FeeSchedule>(ffx.schedule_id());
+    // A higher share tier asking for less volume would break the tiers' prefix order.
+    schedule.set_schedule(
+        ffx.schedule_cap(), bps(5), bps(2),
+        vector[0], vector[bps(5)], vector[bps(2)], vector[], vector[],
+        vector[pct(50), pct(90)], vector[t::usd(10_000), t::usd(5_000)], vector[neg(bps(1) / 10), neg(bps(1) / 5)],
+        1, 14,
+    );
+    ts::return_shared(schedule);
+    f::finish(sc, fx, ffx);
+}
+
+#[test, expected_failure(abort_code = 14, location = perpetuals_fees::config)]
+fun share_tiers_need_a_base_maker_fee() {
+    let (mut sc, fx, ffx) = f::setup();
+    sc.next_tx(fx.admin());
+    let mut schedule = sc.take_shared_by_id<perpetuals_fees::config::FeeSchedule>(ffx.schedule_id());
+    // With no base maker rate a rebate could never be expressed as a multiplier.
+    schedule.set_schedule(
+        ffx.schedule_cap(), bps(5), 0,
+        vector[0], vector[bps(5)], vector[0], vector[], vector[],
+        vector[pct(50)], vector[0], vector[neg(bps(1) / 10)], 1, 14,
     );
     ts::return_shared(schedule);
     f::finish(sc, fx, ffx);

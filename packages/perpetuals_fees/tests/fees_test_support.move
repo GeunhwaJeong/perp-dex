@@ -52,7 +52,8 @@ public fun neg(value: u256): u256 { ifixed::neg(value) }
 
 /// Three volume tiers (0.05%/0.02% under $20k, 0.04%/0.015% under $100k, 0.03%/0.01% above),
 /// three staking tiers (5% at 10, 10% at 100, 40% at 1,000 HANEUL) and two maker-share tiers
-/// (a 0.001% rebate from half the market's maker volume, 0.002% from 90%).
+/// (a 0.001% rebate from half the market's maker volume and $5,000 of the maker's own, 0.002%
+/// from 90% and $10,000).
 public fun setup(): (Scenario, Fx, FeesFx) {
     let (mut sc, fx) = t::setup();
     sc.next_tx(fx.admin());
@@ -77,6 +78,7 @@ public fun setup(): (Scenario, Fx, FeesFx) {
         vector[10 * HANEUL, 100 * HANEUL, 1_000 * HANEUL],
         vector[pct(5), pct(10), pct(40)],
         vector[pct(50), pct(90)],
+        vector[t::usd(5_000), t::usd(10_000)],
         vector[neg(bps(1) / 10), neg(bps(1) / 5)],
         86_400_000,
         14,

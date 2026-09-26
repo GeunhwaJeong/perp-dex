@@ -55,6 +55,7 @@ public struct TierApplied has copy, drop {
     account_id: u64,
     sender: address,
     volume: u256,
+    maker_volume: u256,
     stake: u64,
     maker_share: u256,
     taker_multiplier: u256,
@@ -144,8 +145,8 @@ public fun maker_share<T>(clearing_house: &ClearingHouse<T>, account_id: u64, ep
     ifixed::div_toward_zero(maker_volume(clearing_house, account_id, epoch), market)
 }
 
-/// The multipliers `sender` would get on `account` for `clearing_house` at `epoch`, counting
-/// maker volume not yet swept.
+/// The multipliers a session signed by `sender` would get on `account` for `clearing_house` at
+/// `epoch`, counting maker volume not yet swept.
 public fun multipliers_for<T>(
     clearing_house: &ClearingHouse<T>,
     account: &Account<T>,
@@ -156,7 +157,12 @@ public fun multipliers_for<T>(
 ): (u256, u256) {
     let account_id = account.account_id();
     let volume = ifixed::add(volume(account, epoch), unswept_maker_volume(clearing_house, account_id, epoch));
-    schedule.multipliers(volume, tiers.active_stake(sender), maker_share(clearing_house, account_id, epoch))
+    schedule.multipliers(
+        volume,
+        tiers.active_stake(sender),
+        maker_share(clearing_house, account_id, epoch),
+        maker_volume(clearing_house, account_id, epoch),
+    )
 }
 
 // === Internal ===
@@ -252,8 +258,11 @@ fun apply_multipliers<T>(
     let sender = ctx.sender();
     let stake = tiers.active_stake(sender);
     let account_id = account.account_id();
-    let maker_share = maker_share(clearing_house, account_id, ctx.epoch());
-    let (taker_multiplier, maker_multiplier) = schedule.multipliers(volume, stake, maker_share);
+    let epoch = ctx.epoch();
+    let maker_share = maker_share(clearing_house, account_id, epoch);
+    let maker_volume = maker_volume(clearing_house, account_id, epoch);
+    let (taker_multiplier, maker_multiplier) =
+        schedule.multipliers(volume, stake, maker_share, maker_volume);
     let expires_ms = clock.timestamp_ms() + schedule.multiplier_ttl_ms();
     clearing_house.set_fee_multiplier_as_extension(
         &extension::witness(),
@@ -268,6 +277,7 @@ fun apply_multipliers<T>(
         account_id,
         sender,
         volume,
+        maker_volume,
         stake,
         maker_share,
         taker_multiplier,
