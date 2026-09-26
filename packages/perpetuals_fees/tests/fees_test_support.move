@@ -18,6 +18,7 @@ use perpetuals_fees::config::{Self, AdminCap as ScheduleCap, FeeSchedule};
 use perpetuals_fees::extension::FEES;
 use perpetuals_fees::fees;
 use staking_tiers::registry::{Self as tiers, AdminCap as TierCap, TierRegistry};
+use ifixed::ifixed;
 
 const ONE: u256 = 1_000_000_000_000_000_000;
 const HANEUL: u64 = 1_000_000_000;
@@ -38,14 +39,20 @@ public fun haneul(): u64 { HANEUL }
 /// Thousandths of a dollar to an ifixed value.
 public fun musd(thousandths: u64): u256 { (thousandths as u256) * ONE / 1000 }
 
+/// Millionths of a dollar to an ifixed value.
+public fun uusd(millionths: u64): u256 { (millionths as u256) * ONE / 1_000_000 }
+
 /// An ifixed fraction in percent.
 public fun pct(percent: u64): u256 { (percent as u256) * ONE / 100 }
 
 /// Basis points of notional as an ifixed rate: 5 bp is 0.05%.
 public fun bps(basis_points: u64): u256 { (basis_points as u256) * ONE / 10_000 }
 
-/// Three volume tiers (0.05%/0.02% under $20k, 0.04%/0.015% under $100k, 0.03%/0.01% above)
-/// and three staking tiers (5% at 10, 10% at 100, 40% at 1,000 HANEUL).
+public fun neg(value: u256): u256 { ifixed::neg(value) }
+
+/// Three volume tiers (0.05%/0.02% under $20k, 0.04%/0.015% under $100k, 0.03%/0.01% above),
+/// three staking tiers (5% at 10, 10% at 100, 40% at 1,000 HANEUL) and two maker-share tiers
+/// (a 0.001% rebate from half the market's maker volume, 0.002% from 90%).
 public fun setup(): (Scenario, Fx, FeesFx) {
     let (mut sc, fx) = t::setup();
     sc.next_tx(fx.admin());
@@ -69,6 +76,8 @@ public fun setup(): (Scenario, Fx, FeesFx) {
         vector[bps(2), bps(2) * 3 / 4, bps(1)],
         vector[10 * HANEUL, 100 * HANEUL, 1_000 * HANEUL],
         vector[pct(5), pct(10), pct(40)],
+        vector[pct(50), pct(90)],
+        vector[neg(bps(1) / 10), neg(bps(1) / 5)],
         86_400_000,
         14,
     );
@@ -178,4 +187,13 @@ public fun collateral_of(sc: &mut Scenario, fx: &Fx, who: u64): u256 {
     let (collateral, _, _, _, _, _) = t::position_of(&clearing_house, fx.account_id(who));
     ts::return_shared(clearing_house);
     collateral
+}
+
+/// The market's accrued fees.
+public fun fees_accrued(sc: &mut Scenario, fx: &Fx): u256 {
+    sc.next_tx(fx.admin());
+    let clearing_house = sc.take_shared_by_id<ClearingHouse<TUSD>>(fx.ch_id());
+    let fees = clearing_house.market_state().fees_accrued();
+    ts::return_shared(clearing_house);
+    fees
 }
