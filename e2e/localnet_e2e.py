@@ -1682,6 +1682,10 @@ def main():
     cmds += u256_vec([MAKER_FEE, 15 * 10**13, 10**14], "vmaker")
     cmds += u64_vec(stake_tiers, "smin")
     cmds += u256_vec([ONE // 20, ONE // 10, ONE * 2 // 5], "sdisc")
+    # Makers with half of a market's maker volume get a 0.001% rebate, with 90% a 0.002% one.
+    REBATE_1, REBATE_2 = (1 << 256) - 10**13, (1 << 256) - 2 * 10**13
+    cmds += u256_vec([ONE // 2, ONE * 9 // 10], "shmin")
+    cmds += u256_vec([REBATE_1, REBATE_2], "shfee")
     cmds += call(
         f"{FEES}::config::set_schedule",
         [],
@@ -1694,6 +1698,8 @@ def main():
         "vmaker",
         "smin",
         "sdisc",
+        "shmin",
+        "shfee",
         u64(86_400_000),
         u64(14),
     )
@@ -1754,15 +1760,16 @@ def main():
         cmds += call(f"{PERP}::clearing_house::share", [TUSD], "res.0")
         return track(ptb(label, cmds))
 
-    def refresh_tier(label):
+    def refresh_tier(label, who="T"):
+        a = acct[who]
         return ptb(
             label,
             call(
                 f"{FEES}::fees::refresh",
                 [TUSD, ADMIN],
                 obj(ch2),
-                obj(a_t["cap"]),
-                obj(a_t["obj"]),
+                obj(a["cap"]),
+                obj(a["obj"]),
                 obj(registry),
                 obj(schedule),
                 obj(tier_registry),
@@ -1823,6 +1830,22 @@ def main():
     eq("without stake the second volume tier alone applies: 0.8", int(ta["taker_multiplier"]), ONE * 4 // 5, fmt=str)
     j = ptb("cancel the withdrawal", call(f"{TIERS}::registry::cancel_withdrawal", [], obj(tier_registry), f"@{stake_id}"))
     eq("the principal counts again", int(events(j, "::registry::WithdrawalCanceled")[0]["active_after"]), 100 * HANEUL_UNIT, fmt=str)
+
+    # The maker's side: both fills were credited on the market while M was not in the
+    # transaction; M's refresh sweeps them into its account window and, as the market's only
+    # maker so far, earns the top rebate tier.
+    j = refresh_tier("M refreshes its tier on the second market", "M")
+    ta = events(j, "::fees::TierApplied")[0]
+    eq("M's maker volume swept into its window", int(ta["volume"]), q_a + q_b)
+    eq("M holds the market's whole maker volume", int(ta["maker_share"]), ONE, fmt=str)
+    eq("0.002% rebate over the 0.02% maker fee: multiplier -0.1", signed(ta["maker_multiplier"]), -(ONE // 10), fmt=str)
+    j = fees_session("T market-buys 0.1 BTC against the rebated maker", "T", [market_order(BID, size01)], ch2)
+    ft = events(j, "::events::FilledTakerOrder")[0]
+    q_c = signed(ft["quote_asset_delta_bid"])
+    maker_fees_c = sum(signed(e["maker_fees"]) for ev in events(j, "::events::FilledMakerOrders") for e in ev["events"])
+    eq("the maker is paid 0.002% of the fill", maker_fees_c, -fmul(q_c, 2 * 10**13))
+    # T's cache still holds the 0.8 written after the withdrawal request (the cancel did not refresh it).
+    eq("the taker still pays its cached tiered rate of 0.04%", signed(ft["taker_fees"]), fmul(q_c, 4 * 10**14))
     s11 = snapshot(market=ch2, accts={"M": acct["M"], "T": acct["T"]})
     invariant(s11, "S11 end")
 
