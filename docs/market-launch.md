@@ -86,7 +86,9 @@ Not passed at creation and worth setting explicitly right after with `set_risk_l
 `max_open_interest` (unbounded by default), `max_open_interest_threshold` and
 `max_open_interest_position_percent` (20% above the threshold), `min_order_usd_value` (the
 registry's floor), `max_pending_orders` (the registry's cap), `max_book_index_spread` and
-`max_index_twap_divergence` (5%).
+`max_index_twap_divergence` (5%), and `max_funding_rate` (0.5% of the index per funding period:
+the premium sampled into the funding TWAP is clipped to it, so a book pinned off the index can
+charge at most that much per period whichever side pays).
 
 ## 5. Insurance fund
 

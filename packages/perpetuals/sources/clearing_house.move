@@ -962,6 +962,7 @@ public fun set_risk_limit_params<VendorKey, ADMIN_OR_ASSISTANT, T>(
     max_index_twap_divergence: Option<u256>,
     max_bad_debt: Option<u256>,
     max_socialize_losses_mr_decrease: Option<u256>,
+    max_funding_rate: Option<u256>,
 ) {
     assert_package_version(clearing_house);
     registry.assert_package_version();
@@ -982,6 +983,7 @@ public fun set_risk_limit_params<VendorKey, ADMIN_OR_ASSISTANT, T>(
             max_index_twap_divergence,
             max_bad_debt,
             max_socialize_losses_mr_decrease,
+            max_funding_rate,
         )
 }
 

@@ -177,7 +177,7 @@ fun uncovered_bad_debt_is_socialized_through_funding() {
         ch.set_risk_limit_params(
             t::perp_vk(&fx), registry, option::none(), option::none(), option::none(),
             option::none(), option::none(), option::none(), option::none(),
-            option::some(t::usd(100_000)), option::some(t::one()),
+            option::some(t::usd(100_000)), option::some(t::one()), option::none(),
         );
         ch.donate_to_insurance_fund(coin::mint_for_testing<TUSD>(10_000 * t::tusd_unit(), sc.ctx()), sc.ctx());
     });

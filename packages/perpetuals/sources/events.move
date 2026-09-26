@@ -300,6 +300,7 @@ public struct SetRiskLimitParams has copy, drop {
     max_index_twap_divergence: u256,
     max_bad_debt: u256,
     max_socialize_losses_mr_decrease: u256,
+    max_funding_rate: u256,
 }
 
 public struct DonatedToInsuranceFund has copy, drop {
@@ -884,6 +885,7 @@ public(package) fun set_risk_limit_params(
     max_index_twap_divergence: u256,
     max_bad_debt: u256,
     max_socialize_losses_mr_decrease: u256,
+    max_funding_rate: u256,
 ) {
     event::emit(SetRiskLimitParams {
         ch_id,
@@ -896,6 +898,7 @@ public(package) fun set_risk_limit_params(
         max_index_twap_divergence,
         max_bad_debt,
         max_socialize_losses_mr_decrease,
+        max_funding_rate,
     })
 }
 

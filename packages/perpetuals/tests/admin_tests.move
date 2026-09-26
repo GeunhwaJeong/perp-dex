@@ -349,7 +349,7 @@ fun registry_bounds_change_through_a_config_update() {
         ch.set_risk_limit_params(
             t::perp_vk(&fx), registry, option::some(t::usd(1)), option::some(7), option::none(),
             option::none(), option::none(), option::none(), option::none(), option::none(),
-            option::none(),
+            option::none(), option::none(),
         );
     });
     t::finish(sc, fx);
@@ -368,7 +368,7 @@ fun markets_are_bound_by_the_registry_pending_order_cap() {
         ch.set_risk_limit_params(
             t::perp_vk(&fx), registry, option::none(), option::some(8), option::none(),
             option::none(), option::none(), option::none(), option::none(), option::none(),
-            option::none(),
+            option::none(), option::none(),
         );
     });
     t::finish(sc, fx);

@@ -298,7 +298,7 @@ fun resting_order_must_meet_the_minimum_value() {
         ch.set_risk_limit_params(
             t::perp_vk(&fx), registry, option::some(t::usd(1_000)),
             option::none(), option::none(), option::none(), option::none(), option::none(),
-            option::none(), option::none(), option::none(),
+            option::none(), option::none(), option::none(), option::none(),
         );
     });
     // 0.005 BTC at a 100,000 mark is 500 USD.
@@ -455,7 +455,7 @@ fun pending_order_limit_is_enforced_at_session_end() {
         ch.set_risk_limit_params(
             t::perp_vk(&fx), registry, option::none(), option::some(2),
             option::none(), option::none(), option::none(), option::none(),
-            option::none(), option::none(), option::none(),
+            option::none(), option::none(), option::none(), option::none(),
         );
     });
     t::ladder(&mut sc, &fx, 100_000);

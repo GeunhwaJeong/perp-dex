@@ -102,7 +102,7 @@ The chain limits a published package object to 100 KiB (`max_move_package_size`,
 bytes), and the object carries about 6.7 KB of type origin and linkage tables on top of the
 module bytecode, so a package's modules must stay below roughly 95 KB. `perpetuals` was at that
 line, which is why the stop and TWAP orders live in `perpetuals_orders` (15.8 KB) and drive the
-clearing house through the extension gate; `perpetuals` is now at 81.1 KB. Measure after
+clearing house through the extension gate; `perpetuals` is now at 81.6 KB. Measure after
 building:
 
 ```bash
@@ -117,7 +117,7 @@ and `account`) is how further features can live in packages of their own.
 
 ## Unit tests
 
-Nine packages carry Move unit tests under their `tests/` directories, 304 in total:
+Nine packages carry Move unit tests under their `tests/` directories, 308 in total:
 
 | Package | Tests | What is checked |
 |---|---|---|
@@ -126,7 +126,7 @@ Nine packages carry Move unit tests under their `tests/` directories, 304 in tot
 | `position` | 34 | Fills on both sides with their rounding, taker settlement, funding, free collateral, maker fill restoration, margin requirement checks, bankruptcy price |
 | `oracle_pyth` | 19 | Exponent scaling of Pyth prices to 18 decimals, feed creation from a Pyth price object with its millisecond timestamp, the confidence bound (inclusive at 1%, refused on creation and on update, changed by the package admin, capped at 100%), the feed's binding to that object, source authorization and versioning, feed administration |
 | `market_making_vault` | 25 | LP pricing on cash and on margin, the withdraw request lifecycle, owner-processed withdrawals with the owner fee and treasury, and forced withdrawals: delay, cash-only, closing the position for a dominant share, the partial-close margin band for a small share, order cancelation, and the force-withdraw pause window |
-| `perpetuals` | 92 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization and ADL (13); pausing, close and settlement, treasury, proposals, freezing, registry configuration and the extension gate (23) |
+| `perpetuals` | 96 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization and ADL (13); funding: the premium cap on either side and the funding it bounds, and the cap's range (4); pausing, close and settlement, treasury, proposals, freezing, registry configuration and the extension gate (23) |
 | `perpetuals_orders` | 43 | Stop loss / take profit and standalone stop tickets (23); TWAP tickets (20) |
 | `staking_tiers` | 9 | Deposits on a `test_runner` system state with a real validator, tier thresholds, the withdrawal request, delay, cancel and withdraw paths, and owner and admin checks |
 | `perpetuals_fees` | 29 | The volume window, merging and stale epochs (4); schedule validation, the share floors' order, the base maker fee a rebate needs, the rebate bound and multiplier math (7); sessions on the perpetuals fixture: volume recording, the cached tier on the next session, the staking discount, the maker-side multiplier, expiry, the tier address (signer pricing without one, an owner's stake on a bot-signed session with one, the address always being the registering signer, a foreign cap refused), maker volume credited on the market and swept on refresh, a whole-market share below the volume floor earning nothing, a share rebate paid out of the taker fee, the per-fill rebate cap, and the core's authorization and bound checks (18) |

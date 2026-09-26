@@ -38,6 +38,7 @@ const EInvalidOracleTolerance: u64 = 1025;
 const EInvalidLotAndTickSizes: u64 = 1026;
 const EInvalidMaxBookIndexSpread: u64 = 1027;
 const EInvalidMaxIndexTwapDivergence: u64 = 1028;
+const EInvalidMaxFundingRate: u64 = 1029;
 
 // === Types ===
 
@@ -90,6 +91,9 @@ public struct LimitsParams has copy, drop, store {
     max_index_twap_divergence: u256,
     max_bad_debt: u256,
     max_socialize_losses_mr_decrease: u256,
+    /// The most funding one period may charge, as a fraction of the index price: the premium
+    /// sampled into the funding TWAP is clipped to `index * max_funding_rate`.
+    max_funding_rate: u256,
 }
 
 /// Everything `create_clearing_house` needs to know about a market, built with
@@ -485,6 +489,7 @@ public(package) fun set_risk_limit_params(
     max_index_twap_divergence: Option<u256>,
     max_bad_debt: Option<u256>,
     max_socialize_losses_mr_decrease: Option<u256>,
+    max_funding_rate: Option<u256>,
 ) {
     let min_order_usd_value = option_u256_or(
         &min_order_usd_value,
@@ -526,6 +531,7 @@ public(package) fun set_risk_limit_params(
         &max_socialize_losses_mr_decrease,
         params.limits_params.max_socialize_losses_mr_decrease,
     );
+    let max_funding_rate = option_u256_or(&max_funding_rate, params.limits_params.max_funding_rate);
 
     assert!(
         ifixed::less_than_eq(min_order_usd_value, registry_config.up_min_order_usd_value())
@@ -567,6 +573,12 @@ public(package) fun set_risk_limit_params(
         EInvalidMaxOpenInterestPositionThreshold,
     );
     assert_bad_debt_limits(max_bad_debt, max_socialize_losses_mr_decrease);
+    // Zero would switch funding off altogether; a period may charge at most the whole price.
+    assert!(
+        ifixed::greater_than(max_funding_rate, 0)
+            && ifixed::less_than_eq(max_funding_rate, 1_000_000_000_000_000_000),
+        EInvalidMaxFundingRate,
+    );
 
     params.limits_params.min_order_usd_value = min_order_usd_value;
     params.limits_params.max_pending_orders = max_pending_orders;
@@ -577,6 +589,7 @@ public(package) fun set_risk_limit_params(
     params.limits_params.max_index_twap_divergence = max_index_twap_divergence;
     params.limits_params.max_bad_debt = max_bad_debt;
     params.limits_params.max_socialize_losses_mr_decrease = max_socialize_losses_mr_decrease;
+    params.limits_params.max_funding_rate = max_funding_rate;
     events::set_risk_limit_params(
         *ch_id,
         min_order_usd_value,
@@ -588,6 +601,7 @@ public(package) fun set_risk_limit_params(
         max_index_twap_divergence,
         max_bad_debt,
         max_socialize_losses_mr_decrease,
+        max_funding_rate,
     )
 }
 
@@ -690,6 +704,10 @@ fun create_market_params(
             max_index_twap_divergence: ifixed::from_u64fraction(5, 100),
             max_bad_debt: p.max_bad_debt,
             max_socialize_losses_mr_decrease: p.max_socialize_losses_mr_decrease,
+            // 0.5% of the index per funding period (six hours by default): a squeeze that
+            // pins the book 5% off the index for a whole period costs a tenth of what the
+            // spread clip alone would allow.
+            max_funding_rate: 5_000_000_000_000_000,
         },
     }
 }
@@ -787,6 +805,20 @@ public(package) fun add_bad_debt_to_market(
     )
 }
 
+/// Clamps a premium sample to `+/- index * max_funding_rate`. The funding TWAP is an average of
+/// these samples and a full period pays the TWAP once, so this bounds what one period may charge
+/// whichever way the book leans; the mark price's funding component is bounded with it.
+public fun clip_max_funding_premium(params: &MarketParams, premium: u256, index: u256): u256 {
+    let max_premium = ifixed::mul(index, params.limits_params.max_funding_rate);
+    if (ifixed::greater_than(premium, max_premium)) {
+        max_premium
+    } else if (ifixed::less_than(premium, ifixed::neg(max_premium))) {
+        ifixed::neg(max_premium)
+    } else {
+        premium
+    }
+}
+
 /// Clamps `book` to `index * (1 +/- max_book_index_spread)`.
 public fun clip_max_book_index_spread(params: &MarketParams, book: u256, index: u256): u256 {
     assert!(index != 0, EBadIndexPrice);
@@ -859,7 +891,7 @@ fun update_premium_twap(
     ch_id: &ID
 ) {
     state.premium_twap = update_twap(
-        ifixed::sub(clipped_book_price, index_price),
+        clip_max_funding_premium(params, ifixed::sub(clipped_book_price, index_price), index_price),
         state.premium_twap,
         now,
         state.premium_twap_last_upd_ms,
@@ -1053,6 +1085,10 @@ public fun max_open_interest_position_params(market_params: &MarketParams): (u25
         market_params.limits_params.max_open_interest_threshold,
         market_params.limits_params.max_open_interest_position_percent,
     )
+}
+
+public fun max_funding_rate(market_params: &MarketParams): u256 {
+    market_params.limits_params.max_funding_rate
 }
 
 public fun max_bad_debt_thresholds(market_params: &MarketParams): (u256, u256) {
