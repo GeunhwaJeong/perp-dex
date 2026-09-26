@@ -1,0 +1,11 @@
+[package]
+name = "staking_tiers"
+edition = "2024"
+
+[dependencies]
+Haneul = { local = "../../deps/haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../deps/haneul-src/crates/haneul-framework/packages/move-stdlib" }
+HaneulSystem = { local = "../../deps/haneul-src/crates/haneul-framework/packages/haneul-system" }
+
+[addresses]
+staking_tiers = "0x0"
