@@ -117,7 +117,7 @@ and `account`) is how further features can live in packages of their own.
 
 ## Unit tests
 
-Ten packages carry Move unit tests under their `tests/` directories, 319 in total:
+Ten packages carry Move unit tests under their `tests/` directories, 320 in total:
 
 | Package | Tests | What is checked |
 |---|---|---|
@@ -126,7 +126,7 @@ Ten packages carry Move unit tests under their `tests/` directories, 319 in tota
 | `position` | 34 | Fills on both sides with their rounding, taker settlement, funding, free collateral, maker fill restoration, margin requirement checks, bankruptcy price |
 | `oracle_pyth` | 19 | Exponent scaling of Pyth prices to 18 decimals, feed creation from a Pyth price object with its millisecond timestamp, the confidence bound (inclusive at 1%, refused on creation and on update, changed by the package admin, capped at 100%), the feed's binding to that object, source authorization and versioning, feed administration |
 | `market_making_vault` | 25 | LP pricing on cash and on margin, the withdraw request lifecycle, owner-processed withdrawals with the owner fee and treasury, and forced withdrawals: delay, cash-only, closing the position for a dominant share, the partial-close margin band for a small share, order cancelation, and the force-withdraw pause window |
-| `perpetuals` | 102 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization, a collateral haircut that liquidates what the raw collateral would keep with the size cross-checked against the haircut formula, settlement bad debt refused without and paid by the insurance fund, and ADL including the weighted split of the bad debt across two counterparties (18); funding: the premium cap on either side and the funding it bounds, the cap's range, and the three-interval catch-up (5); pausing, close and settlement, treasury, proposals, freezing, registry configuration and the extension gate (23) |
+| `perpetuals` | 103 | A 120-step pseudo-random sequence of price moves, shocks and a crash, resting and crossing orders, cancels, deallocations and liquidations, with the vault's backing of every position's books checked after each step (1); the order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization, a collateral haircut that liquidates what the raw collateral would keep with the size cross-checked against the haircut formula, settlement bad debt refused without and paid by the insurance fund, and ADL including the weighted split of the bad debt across two counterparties (18); funding: the premium cap on either side and the funding it bounds, the cap's range, and the three-interval catch-up (5); pausing, close and settlement, treasury, proposals, freezing, registry configuration and the extension gate (23) |
 | `perpetuals_orders` | 43 | Stop loss / take profit and standalone stop tickets (23); TWAP tickets (20) |
 | `oracle_aggregator` | 5 | The median of one, two (their mean, rounded down, without overflow) and three prices, and the empty and four-price aborts |
 | `staking_tiers` | 9 | Deposits on a `test_runner` system state with a real validator, tier thresholds, the withdrawal request, delay, cancel and withdraw paths, and owner and admin checks |
