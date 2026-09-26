@@ -1,0 +1,14 @@
+[package]
+name = "perpetuals_fees"
+edition = "2024"
+
+[dependencies]
+Haneul = { local = "../../deps/haneul-src/crates/haneul-framework/packages/haneul-framework" }
+MoveStdlib = { local = "../../deps/haneul-src/crates/haneul-framework/packages/move-stdlib" }
+perpetuals = { local = "../perpetuals" }
+authority_cap = { local = "../authority_cap" }
+ifixed = { local = "../ifixed" }
+staking_tiers = { local = "../staking_tiers" }
+
+[addresses]
+perpetuals_fees = "0x0"
