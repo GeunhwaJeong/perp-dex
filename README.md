@@ -117,7 +117,7 @@ and `account`) is how further features can live in packages of their own.
 
 ## Unit tests
 
-Nine packages carry Move unit tests under their `tests/` directories, 314 in total:
+Ten packages carry Move unit tests under their `tests/` directories, 319 in total:
 
 | Package | Tests | What is checked |
 |---|---|---|
@@ -128,6 +128,7 @@ Nine packages carry Move unit tests under their `tests/` directories, 314 in tot
 | `market_making_vault` | 25 | LP pricing on cash and on margin, the withdraw request lifecycle, owner-processed withdrawals with the owner fee and treasury, and forced withdrawals: delay, cash-only, closing the position for a dominant share, the partial-close margin band for a small share, order cancelation, and the force-withdraw pause window |
 | `perpetuals` | 102 | The order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization, a collateral haircut that liquidates what the raw collateral would keep with the size cross-checked against the haircut formula, settlement bad debt refused without and paid by the insurance fund, and ADL including the weighted split of the bad debt across two counterparties (18); funding: the premium cap on either side and the funding it bounds, the cap's range, and the three-interval catch-up (5); pausing, close and settlement, treasury, proposals, freezing, registry configuration and the extension gate (23) |
 | `perpetuals_orders` | 43 | Stop loss / take profit and standalone stop tickets (23); TWAP tickets (20) |
+| `oracle_aggregator` | 5 | The median of one, two (their mean, rounded down, without overflow) and three prices, and the empty and four-price aborts |
 | `staking_tiers` | 9 | Deposits on a `test_runner` system state with a real validator, tier thresholds, the withdrawal request, delay, cancel and withdraw paths, and owner and admin checks |
 | `perpetuals_fees` | 29 | The volume window, merging and stale epochs (4); schedule validation, the share floors' order, the base maker fee a rebate needs, the rebate bound and multiplier math (7); sessions on the perpetuals fixture: volume recording, the cached tier on the next session, the staking discount, the maker-side multiplier, expiry, the tier address (signer pricing without one, an owner's stake on a bot-signed session with one, the address always being the registering signer, a foreign cap refused), maker volume credited on the market and swept on refresh, a whole-market share below the volume floor earning nothing, a share rebate paid out of the taker fee, the per-fill rebate cap, and the core's authorization and bound checks (18) |
 
@@ -200,9 +201,9 @@ See `docs/market-launch.md` for the launch order and the operators a market depe
 ## Status
 
 The packages are not published. Unit tests cover `ifixed`, `ordered_map`, `position`,
-`perpetuals`, `perpetuals_orders`, `staking_tiers`, `perpetuals_fees`, `oracle_pyth` and
-`market_making_vault`; the aggregator, vendor and the small `authority_cap` and `af_lp` packages
-are only exercised by the localnet suite.
+`perpetuals`, `perpetuals_orders`, `staking_tiers`, `perpetuals_fees`, `oracle_pyth`,
+`oracle_aggregator` (its median only) and `market_making_vault`; the vendor and the small
+`authority_cap` and `af_lp` packages are only exercised by the localnet suite.
 
 ## License
 

@@ -284,7 +284,7 @@ public fun median_twap_price_from_sources_(
     if (twap_price_count == 1) {
         first_twap_price
     } else if (twap_price_count == 2) {
-        u128::max(first_twap_price, second_twap_price)
+        middle_of_two(first_twap_price, second_twap_price)
     } else {
         let a = first_twap_price;
         let b = second_twap_price;
@@ -346,7 +346,7 @@ public fun median_price_and_twap_price_from_sources_(
     let median_price = if (price_count == 1) {
         first_price
     } else if (price_count == 2) {
-        u128::max(first_price, second_price)
+        middle_of_two(first_price, second_price)
     } else {
         let a = first_price;
         let b = second_price;
@@ -356,7 +356,7 @@ public fun median_price_and_twap_price_from_sources_(
     let median_twap_price = if (twap_price_count == 1) {
         first_twap_price
     } else if (twap_price_count == 2) {
-        u128::max(first_twap_price, second_twap_price)
+        middle_of_two(first_twap_price, second_twap_price)
     } else {
         let a = first_twap_price;
         let b = second_twap_price;
@@ -701,8 +701,7 @@ public fun median_of(prices: vector<u128>): u128 {
     if (len == 1) {
         prices[0]
     } else if (len == 2) {
-        // Two prices have no middle element; the higher one is used.
-        u128::max(prices[0], prices[1])
+        middle_of_two(prices[0], prices[1])
     } else {
         assert!(len == 3, ETooManyPriceFeedsForMedian);
         let a = prices[0];
@@ -710,4 +709,12 @@ public fun median_of(prices: vector<u128>): u128 {
         let c = prices[2];
         u128::max(u128::min(u128::max(a, b), c), u128::min(a, b))
     }
+}
+
+/// Two prices have no middle element. Their mean is taken, rounded down: picking either one
+/// would lean every consumer the same way (a higher price liquidates shorts sooner and longs
+/// later), and a feed that disagrees with the other by more than the consumer tolerates should
+/// be caught by that tolerance rather than by which of the two happens to win.
+fun middle_of_two(a: u128, b: u128): u128 {
+    ((((a as u256) + (b as u256)) / 2) as u128)
 }
