@@ -55,6 +55,8 @@ PACKAGES = [
     "oracle_aggregator",
     "perpetuals",
     "perpetuals_orders",
+    "staking_tiers",
+    "perpetuals_fees",
     "market_making_vault",
 ]
 
@@ -381,7 +383,7 @@ def main():
     TUSD = f"{E2E}::tusd::TUSD"
     VK = f"{E2E}::vendor_key::E2E"
     PAUSE_GUARDIAN = f"{PERP}::authority::PAUSE_GUARDIAN"
-    check("all 11 packages published", len(P) == len(PACKAGES) + 1)
+    check("all 13 packages published", len(P) == len(PACKAGES) + 1)
 
     vendor_config = shared_created(ids["vendor"]["tx"], "::config::Config")
     vendor_pkg_admin = owned_created(ids["vendor"]["tx"], "::authority::AuthorityCap<")
@@ -436,6 +438,13 @@ def main():
     cmds += call(
         f"{PERP}::registry::authorize_extension",
         [f"{P['perpetuals_orders']}::extension::ORDERS"],
+        obj(registry),
+        obj(perp_pkg_admin),
+    )
+    # The fee tier package caches per-account fee multipliers through the same gate.
+    cmds += call(
+        f"{PERP}::registry::authorize_extension",
+        [f"{P['perpetuals_fees']}::extension::FEES"],
         obj(registry),
         obj(perp_pkg_admin),
     )
@@ -1649,6 +1658,173 @@ def main():
     eq("only the owner-locked LP is left", v7["lp_supply"], TUSD_UNIT, fmt=str)
     check("owner's locked LP is still backed by cash", v7["acc"]["VAULT"] > 0, f"{v7['acc']['VAULT'] / TUSD_UNIT:.6f} TUSD")
     invariant(v7, "S10 end")
+
+    # ------------------------------------------------------------ S11 fee tiers
+    section("S11 fee tiers: taker volume window, staking discount, cached multipliers")
+    TIERS, FEES = P["staking_tiers"], P["perpetuals_fees"]
+    HANEUL_UNIT = 10**9
+    tier_registry = shared_created(ids["staking_tiers"]["tx"], "::registry::TierRegistry")
+    tier_admin = owned_created(ids["staking_tiers"]["tx"], "::registry::AdminCap")
+    schedule = shared_created(ids["perpetuals_fees"]["tx"], "::config::FeeSchedule")
+    schedule_admin = owned_created(ids["perpetuals_fees"]["tx"], "::config::AdminCap")
+
+    def u256_vec(values, name):
+        return ["--make-move-vec", "<u256>", "[" + ", ".join(u256(v) for v in values) + "]", "--assign", name]
+
+    def u64_vec(values, name):
+        return ["--make-move-vec", "<u64>", "[" + ", ".join(u64(v) for v in values) + "]", "--assign", name]
+
+    # Volume tiers at the market's rates, then 0.04%/0.015% from $20k and 0.03%/0.01% from
+    # $100k; staking discounts of 5%, 10% and 40% at 10, 50 and 100 HANEUL.
+    stake_tiers = [10 * HANEUL_UNIT, 50 * HANEUL_UNIT, 100 * HANEUL_UNIT]
+    cmds = u256_vec([0, fx(20_000), fx(100_000)], "vmin")
+    cmds += u256_vec([TAKER_FEE, 4 * 10**14, 3 * 10**14], "vtaker")
+    cmds += u256_vec([MAKER_FEE, 15 * 10**13, 10**14], "vmaker")
+    cmds += u64_vec(stake_tiers, "smin")
+    cmds += u256_vec([ONE // 20, ONE // 10, ONE * 2 // 5], "sdisc")
+    cmds += call(
+        f"{FEES}::config::set_schedule",
+        [],
+        obj(schedule),
+        obj(schedule_admin),
+        u256(TAKER_FEE),
+        u256(MAKER_FEE),
+        "vmin",
+        "vtaker",
+        "vmaker",
+        "smin",
+        "sdisc",
+        u64(86_400_000),
+        u64(14),
+    )
+    cmds += u64_vec(stake_tiers, "thresholds")
+    cmds += call(f"{TIERS}::registry::set_thresholds", [], obj(tier_registry), obj(tier_admin), "thresholds")
+    j = ptb("set the fee schedule and the staking thresholds", cmds)
+    check("schedule updated", len(events(j, "::config::ScheduleUpdated")) == 1)
+    check("thresholds updated", len(events(j, "::registry::ThresholdsUpdated")) == 1)
+
+    a_t = acct["T"]
+    cmds = call("0x2::coin::mint", [TUSD], obj(tusd_treasury), u64(50_000 * TUSD_UNIT), assign="c")
+    cmds += call(f"{PERP}::account::deposit_collateral", [TUSD, ADMIN], obj(a_t["obj"]), obj(a_t["cap"]), obj(registry), "c")
+    cmds += call(f"{PERP}::clearing_house::create_market_position", [TUSD, ADMIN], obj(ch2), obj(a_t["cap"]), obj(a_t["obj"]))
+    cmds += call(
+        f"{PERP}::clearing_house::allocate_collateral",
+        [TUSD, ADMIN],
+        obj(ch2),
+        obj(a_t["cap"]),
+        obj(a_t["obj"]),
+        u64(40_000 * TUSD_UNIT),
+    )
+    minted += 50_000 * TUSD_UNIT
+    ptb("T funds a position on the second market", cmds)
+    session("M posts three asks on the second market", "M", [limit(ASK, size01, px(101_100 + 100 * i)) for i in range(3)], market=ch2)
+
+    def fees_session(label, who, actions, market):
+        """A session ended through the fee tier extension instead of the core."""
+        a = acct[who]
+        cmds = refresh_prices() + no_integrator()
+        cmds += call(
+            f"{PERP}::clearing_house::start_session",
+            [TUSD, ADMIN],
+            obj(market),
+            obj(a["cap"]),
+            obj(a["obj"]),
+            obj(pfs_btc),
+            obj(pfs_tusd),
+            "no_integrator",
+            CLOCK,
+            assign="hp",
+        )
+        for act in actions:
+            cmds += act
+        cmds += call(
+            f"{FEES}::fees::end_session",
+            [TUSD, ADMIN],
+            "hp",
+            obj(a["cap"]),
+            obj(a["obj"]),
+            obj(registry),
+            obj(schedule),
+            obj(tier_registry),
+            "false",
+            "false",
+            CLOCK,
+            assign="res",
+        )
+        cmds += call(f"{PERP}::clearing_house::share", [TUSD], "res.0")
+        return track(ptb(label, cmds))
+
+    def refresh_tier(label):
+        return ptb(
+            label,
+            call(
+                f"{FEES}::fees::refresh",
+                [TUSD, ADMIN],
+                obj(ch2),
+                obj(a_t["cap"]),
+                obj(a_t["obj"]),
+                obj(registry),
+                obj(schedule),
+                obj(tier_registry),
+                CLOCK,
+            ),
+        )
+
+    j = fees_session("T market-buys 0.1 BTC through the fee tier extension", "T", [market_order(BID, size01)], ch2)
+    ft = events(j, "::events::FilledTakerOrder")[0]
+    q_a = signed(ft["quote_asset_delta_bid"])
+    check("the buy filled", q_a > 0, usd(q_a))
+    eq("no tier yet: taker pays the market's 0.05%", signed(ft["taker_fees"]), fmul(q_a, TAKER_FEE))
+    ta = events(j, "::fees::TierApplied")[0]
+    eq("the session's notional is recorded as volume", int(ta["volume"]), q_a)
+    eq("tier 0 without stake caches a multiplier of one", int(ta["taker_multiplier"]), ONE, fmt=str)
+    check("the core emitted the cached multiplier", len(events(j, "::events::SetFeeMultiplier")) == 1)
+
+    # Stake 100 HANEUL with the first validator and deposit the StakedHaneul into the registry.
+    validator = json.loads(
+        subprocess.run(
+            ["curl", "-s", f"http://{GRPC_ADDR[0]}", "-H", "content-type: application/json",
+             "-d", '{"jsonrpc":"2.0","id":1,"method":"haneulx_getLatestHaneulSystemState","params":[]}'],
+            capture_output=True, text=True,
+        ).stdout
+    )["result"]["activeValidators"][0]["haneulAddress"]
+    cmds = ["--split-coins", "gas", f"[{100 * HANEUL_UNIT}]", "--assign", "stake_coin"]
+    cmds += call("0x3::haneul_system::request_add_stake_non_entry", [], "@0x5", "stake_coin", f"@{validator}", assign="st")
+    cmds += call(f"{TIERS}::registry::deposit", [], obj(tier_registry), "st")
+    j = ptb("stake 100 HANEUL and deposit it into the tier registry", cmds)
+    dep = events(j, "::registry::Deposited")[0]
+    eq("100 HANEUL of principal counts at once", int(dep["active_after"]), 100 * HANEUL_UNIT, fmt=str)
+    stake_id = dep["stake_id"]
+
+    j = refresh_tier("refresh T's tier on the second market")
+    ta = events(j, "::fees::TierApplied")[0]
+    eq("stake read from the registry", int(ta["stake"]), 100 * HANEUL_UNIT, fmt=str)
+    eq("40% staking discount: taker multiplier 0.6", int(ta["taker_multiplier"]), ONE * 6 // 10, fmt=str)
+    eq("maker multiplier 0.6", int(ta["maker_multiplier"]), ONE * 6 // 10, fmt=str)
+
+    j = fees_session("T market-buys 0.1 BTC at the discounted rate", "T", [market_order(BID, size01)], ch2)
+    ft = events(j, "::events::FilledTakerOrder")[0]
+    q_b = signed(ft["quote_asset_delta_bid"])
+    eq("taker pays 0.03% = 60% of the market rate", signed(ft["taker_fees"]), fmul(q_b, 3 * 10**14))
+    ta = events(j, "::fees::TierApplied")[0]
+    eq("volume accumulates across sessions", int(ta["volume"]), q_a + q_b)
+    eq("volume past $20k reaches the second tier: 0.04% less 40% = 0.024%, multiplier 0.48", int(ta["taker_multiplier"]), ONE * 48 // 100, fmt=str)
+
+    j = ptb("request the stake's withdrawal", call(f"{TIERS}::registry::request_withdrawal", [], obj(tier_registry), f"@{stake_id}", CLOCK))
+    wr = events(j, "::registry::WithdrawalRequested")[0]
+    eq("the principal stops counting on request", int(wr["active_after"]), 0, fmt=str)
+    ptb(
+        "withdraw before the delay",
+        call(f"{TIERS}::registry::withdraw_and_transfer", [], obj(tier_registry), f"@{stake_id}", CLOCK),
+        expect_abort=("registry", 5),
+    )
+    j = refresh_tier("refresh T's tier after the request")
+    ta = events(j, "::fees::TierApplied")[0]
+    eq("without stake the second volume tier alone applies: 0.8", int(ta["taker_multiplier"]), ONE * 4 // 5, fmt=str)
+    j = ptb("cancel the withdrawal", call(f"{TIERS}::registry::cancel_withdrawal", [], obj(tier_registry), f"@{stake_id}"))
+    eq("the principal counts again", int(events(j, "::registry::WithdrawalCanceled")[0]["active_after"]), 100 * HANEUL_UNIT, fmt=str)
+    s11 = snapshot(market=ch2, accts={"M": acct["M"], "T": acct["T"]})
+    invariant(s11, "S11 end")
 
     # Every TUSD ever minted is accounted for.
     s_end1 = snapshot(with_mark=False)
