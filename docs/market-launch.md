@@ -12,10 +12,18 @@ TWAP bounds, proposal delays, minimum order value range, the insurance reserve f
 oracle tolerance floor, and the pending order and assistant caps. Review them before the first
 market; the defaults are conservative but not tuned for any particular asset.
 
-Authorize the conditional order package once:
-`registry::authorize_extension<perpetuals_orders::extension::ORDERS>` with the package admin cap.
-Stop and TWAP tickets cannot be created or executed until this is done, and
-`deauthorize_extension` switches them off again.
+Authorize the extension packages once with the package admin cap:
+`registry::authorize_extension<perpetuals_orders::extension::ORDERS>` for conditional orders and
+`registry::authorize_extension<perpetuals_fees::extension::FEES>` for fee tiers. Stop and TWAP
+tickets cannot be created or executed, and fee multipliers cannot be cached, until this is done;
+`deauthorize_extension` switches either off again.
+
+Then set the fee schedule (`perpetuals_fees::config::set_schedule` with the schedule admin cap):
+the reference base rates, the volume tiers as absolute rates at or below the base, the staking
+tiers as discounts, the multiplier lifetime and the volume window in epochs. Set the staking tier
+thresholds and withdrawal delay on the `staking_tiers` registry (`registry::set_thresholds`,
+`registry::set_withdraw_delay_ms`). Markets whose rates differ from the base rates are discounted
+in proportion.
 
 Caps to mint from the package admin cap, each to a separate operator key:
 
@@ -93,6 +101,7 @@ Liquidations add the insurance fee share of every liquidated notional to it.
 | ADL operator | `adl::execute_adl` | Negative-equity positions when socialization is off or exhausted |
 | Stale order sweeper (optional) | `try_cancel_stale_orders` with the maintenance cap | Expired and no-longer-reducing reduce-only orders |
 | Stop and TWAP executors | `perpetuals_orders::stop_orders::place_stop_order_*`, `perpetuals_orders::twap_orders::execute` | Conditional orders are executed by whoever the ticket names |
+| Fee tier front end (no operator) | `perpetuals_fees::fees::end_session` in place of `clearing_house::end_session`, `fees::refresh` after staking | Volume is only recorded and multipliers only cached through these calls; a session ended through the core pays the market rate |
 
 Two calculations the operators must get right:
 
