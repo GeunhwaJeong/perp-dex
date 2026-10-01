@@ -1,8 +1,8 @@
 # Haneul Perpetuals
 
 An on-chain perpetual futures exchange for Haneul, written in Haneul Move. Each market is a
-clearing house with its own central limit order book. Prices come from an oracle aggregator that
-Pyth feeds through an adapter, and market-making vaults let depositors provide liquidity through a
+clearing house with its own central limit order book. Prices come from an oracle aggregator
+that sources feed through adapters (signed prices relayed by anyone, or Pyth), and market-making vaults let depositors provide liquidity through a
 managed trading account.
 
 None of the packages are published yet; every package address is `0x0`.
@@ -18,6 +18,7 @@ None of the packages are published yet; every package address is `0x0`.
 | `position` | position | Position accounting: fills, funding settlement, bad debt | ifixed |
 | `vendor` | authority, config, events, init, metadata | Registration and metadata of the vendors that operate markets and price feeds | authority_cap |
 | `oracle_aggregator` | authority, config, events, init, price, price_feed, price_feed_storage, source | Price feed storage; newest, median and TWAP prices across sources | vendor, authority_cap |
+| `oracle_haneul` | events, init, price_feed_storage, source | Source of signed prices: writes an 18-decimal price into `oracle_aggregator` feeds when it carries an Ed25519 signature by one of the source's signers over the source object, the feed, the price, its confidence interval and its timestamp. Anyone may relay an update. Refuses expired signers, timestamps ahead of the chain clock by more than the drift bound (3 s by default) and confidence intervals wider than the source's bound (1% by default) | oracle_aggregator, authority_cap |
 | `oracle_pyth` | init, price_feed_storage, source | Adapter that writes Pyth prices into `oracle_aggregator` feeds, refusing prices whose confidence interval is wider than the source's bound (1% by default) | the above, Pyth |
 | `perpetuals` | account, adl, authority, clearing_house, events, init, keys, market, orderbook, registry | Clearing house, order book, markets, accounts, liquidation, ADL, and the extension gate other packages drive sessions through | vendor, ifixed, authority_cap, position, oracle_aggregator, ordered_map |
 | `perpetuals_orders` | events, extension, stop_orders, twap_orders | Stop loss / take profit, standalone stop and TWAP order tickets, executed through the perpetuals extension gate with the `ORDERS` witness | perpetuals, authority_cap, oracle_aggregator, ifixed |
@@ -26,7 +27,7 @@ None of the packages are published yet; every package address is `0x0`.
 | `market_making_vault` | authority, config, errors, events, init, interface, keys, metadata, perpetuals_api, vault | LP vaults: deposits, withdrawal requests, trading sessions run by the vault owner | perpetuals, perpetuals_orders and six others |
 
 Publish order: `ifixed`, `authority_cap`, `ordered_map`, `af_lp`, then `position`, `vendor`, then
-`oracle_aggregator`, then `oracle_pyth`, `perpetuals`, `perpetuals_orders`, `staking_tiers`,
+`oracle_aggregator`, then `oracle_haneul`, `oracle_pyth`, `perpetuals`, `perpetuals_orders`, `staking_tiers`,
 `perpetuals_fees`, then `market_making_vault`.
 After publishing, the perpetuals package admin authorizes the extension witnesses with
 `registry::authorize_extension<perpetuals_orders::extension::ORDERS>` and
@@ -117,13 +118,14 @@ and `account`) is how further features can live in packages of their own.
 
 ## Unit tests
 
-Ten packages carry Move unit tests under their `tests/` directories, 320 in total:
+Eleven packages carry Move unit tests under their `tests/` directories, 352 in total:
 
 | Package | Tests | What is checked |
 |---|---|---|
 | `ifixed` | 32 | Every arithmetic variant against a sign-and-magnitude reference, on edge values and pseudo-random operands, including rounding directions and overflow aborts |
 | `ordered_map` | 21 | The B+ tree against a sorted vector under insert, remove, try-remove, clear and batch-drop sequences with the smallest node parameters |
 | `position` | 34 | Fills on both sides with their rounding, taker settlement, funding, free collateral, maker fill restoration, margin requirement checks, bankruptcy price |
+| `oracle_haneul` | 32 | Signed updates made ahead of time by `e2e/oracle_signing.py`: feed creation and update, the TWAP after an update, a late or repeated update skipped without aborting, the signature's binding to the price, confidence, timestamp, feed and signer, the signer set (added, expiring, removed, capped at 16, 32-byte keys), the zero price, the confidence bound (inclusive at 1%), the drift bound (inclusive at 3 s), source authorization and a revoked assistant cap |
 | `oracle_pyth` | 19 | Exponent scaling of Pyth prices to 18 decimals, feed creation from a Pyth price object with its millisecond timestamp, the confidence bound (inclusive at 1%, refused on creation and on update, changed by the package admin, capped at 100%), the feed's binding to that object, source authorization and versioning, feed administration |
 | `market_making_vault` | 25 | LP pricing on cash and on margin, the withdraw request lifecycle, owner-processed withdrawals with the owner fee and treasury, and forced withdrawals: delay, cash-only, closing the position for a dominant share, the partial-close margin band for a small share, order cancelation, and the force-withdraw pause window |
 | `perpetuals` | 103 | A 120-step pseudo-random sequence of price moves, shocks and a crash, resting and crossing orders, cancels, deallocations and liquidations, with the vault's backing of every position's books checked after each step (1); the order book alone (18); matching, order types, validation, self-trade, expiry, reduce-only, margin and collateral flows (38); liquidation, bad debt, socialization, a collateral haircut that liquidates what the raw collateral would keep with the size cross-checked against the haircut formula, settlement bad debt refused without and paid by the insurance fund, and ADL including the weighted split of the bad debt across two counterparties (18); funding: the premium cap on either side and the funding it bounds, the cap's range, and the three-interval catch-up (5); pausing, close and settlement, treasury, proposals, freezing, registry configuration and the extension gate (23) |
@@ -158,11 +160,11 @@ python3 e2e/localnet_e2e.py
 
 The script uses `deps/bin/haneul` when it exists and `haneul` on `PATH` otherwise; set `HANEUL` to
 use another binary. It refuses to run unless the active environment is local and the chain is not
-Haneul mainnet. A full run takes about four minutes and ends with `241/241 checks passed`.
+Haneul mainnet. A full run takes about four minutes and ends with `243/243 checks passed`.
 
 | Scenario | What is checked |
 |---|---|
-| Setup | Vendor, oracle and market registration; four accounts funded |
+| Setup | Vendor, oracle and market registration; the price signer registered on the `oracle_haneul` source, both feeds created from signed prices and a tampered update refused; four accounts funded |
 | S1 | A 12-order maker ladder: best prices, pending sizes, order counts |
 | S2 | Leverage opt-in, a market buy across three price levels, taker and maker fees |
 | S3 | A limit order that fills partially and rests the remainder |
@@ -175,7 +177,8 @@ Haneul mainnet. A full run takes about four minutes and ends with `241/241 check
 | S10 | Market-making vault: creation, deposits and LP pricing, trading through the vault, lock period, withdrawal with owner fee, pause |
 | S11 | Fee tiers: the schedule and staking thresholds, the tier address registered (and a foreign cap refused), a session ended through `perpetuals_fees` that records volume and caches a multiplier priced by that address, the maker's whole-market share reaching only the first rebate tier on one fill, a real `StakedHaneul` deposited into the tier registry, the 40% staking discount on the next fill, the second volume tier, the withdrawal request dropping the tier, the early withdrawal rejected, the cancel, the maker's swept volume passing the second floor, and a fill that pays the maker a rebate |
 
-In total 29 of the checks are actions that must be rejected with a specific abort code. After every
+Every price the markets trade on is signed by the script (`e2e/oracle_signing.py`) and relayed in
+the same transaction as the session that uses it. In total 30 of the checks are actions that must be rejected with a specific abort code. After every
 step the script also checks that each market's collateral equals the sum of position equity at entry
 prices plus accrued fees.
 
@@ -201,7 +204,7 @@ See `docs/market-launch.md` for the launch order and the operators a market depe
 ## Status
 
 The packages are not published. Unit tests cover `ifixed`, `ordered_map`, `position`,
-`perpetuals`, `perpetuals_orders`, `staking_tiers`, `perpetuals_fees`, `oracle_pyth`,
+`perpetuals`, `perpetuals_orders`, `staking_tiers`, `perpetuals_fees`, `oracle_haneul`, `oracle_pyth`,
 `oracle_aggregator` (its median only) and `market_making_vault`; the vendor and the small
 `authority_cap` and `af_lp` packages are only exercised by the localnet suite.
 
