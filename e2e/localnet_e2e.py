@@ -3,10 +3,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Localnet end-to-end test of the Haneul perp engine in packages/.
 
-Publishes the ten engine packages plus the `perp_e2e` helper to a running localnet, opens a
-BTC/USD market collateralized in TUSD whose prices come from a hand-driven oracle source, then
-trades, cancels, liquidates, collects fees and settles through real transactions, and finally runs
-a market-making vault on a second market. Every amount is checked against a value derived
+Publishes the engine packages plus the `perp_e2e` helper to a running localnet, opens a
+BTC/USD market collateralized in TUSD whose prices this script signs and relays through the
+`oracle_haneul` source, then trades, cancels, liquidates, collects fees and settles through real
+transactions, and finally runs a market-making vault on a second market. Every amount is checked against a value derived
 independently in this file. Engine state is read by simulating
 `perp_e2e::probe` calls over gRPC (`grpcurl`, TransactionExecutionService/SimulateTransaction).
 
@@ -31,6 +31,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import oracle_signing  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 # A local copy of the CLI in deps/bin/ wins over the one on PATH; HANEUL overrides both.
 _LOCAL_CLI = ROOT / "deps/bin/haneul"
@@ -53,6 +56,7 @@ PACKAGES = [
     "position",
     "vendor",
     "oracle_aggregator",
+    "oracle_haneul",
     "perpetuals",
     "perpetuals_orders",
     "staking_tiers",
@@ -74,6 +78,11 @@ TICK = B9  # $1
 MAX_BAD_DEBT = 0
 MAX_SOCIALIZE_MR_DECREASE = 0
 PRIORITY_TAKER_FEE = 10**15
+
+# Throwaway key of the price signer registered on the `oracle_haneul` source.
+ORACLE_SIGNER_SEED = bytes([0x33] * 32)
+ORACLE_SIGNER = oracle_signing.public_key(ORACLE_SIGNER_SEED)
+U64_MAX = 2**64 - 1
 
 ASK, BID = True, False
 GTC, FOK, POST_ONLY, IOC = 0, 1, 2, 3
@@ -155,6 +164,10 @@ def obj(i):
     return f"@{i}"
 
 
+def vec_u8(data):
+    return "vector[" + ",".join(f"{x}u8" for x in data) + "]"
+
+
 def call(target, type_args, *args, assign=None):
     cmd = ["--move-call", target]
     if type_args:
@@ -165,8 +178,10 @@ def call(target, type_args, *args, assign=None):
     return cmd
 
 
+# Plain abort codes and `#[error]` constants are reported differently by the CLI.
 ABORT_RE = re.compile(
-    r"aborted within function '0x[0-9a-f]+::(\w+)::(\w+)' at instruction \d+ with code (\d+)"
+    r"aborted within function '0x[0-9a-f]+::(\w+)::(\w+)' at "
+    r"(?:instruction \d+ with code|line \d+\. Aborted with error code) (\d+)"
 )
 
 
@@ -372,10 +387,11 @@ def main():
     ids = publish_all()
     P = {k: v["pkg"] for k, v in ids.items()}
     w.P = P
-    AUTH, VENDOR, ORACLE, PERP, E2E = (
+    AUTH, VENDOR, ORACLE, SIGNED, PERP, E2E = (
         P["authority_cap"],
         P["vendor"],
         P["oracle_aggregator"],
+        P["oracle_haneul"],
         P["perpetuals"],
         P["perp_e2e"],
     )
@@ -383,7 +399,7 @@ def main():
     TUSD = f"{E2E}::tusd::TUSD"
     VK = f"{E2E}::vendor_key::E2E"
     PAUSE_GUARDIAN = f"{PERP}::authority::PAUSE_GUARDIAN"
-    check("all 13 packages published", len(P) == len(PACKAGES) + 1)
+    check("all 14 packages published", len(P) == len(PACKAGES) + 1 == 14)
 
     vendor_config = shared_created(ids["vendor"]["tx"], "::config::Config")
     vendor_pkg_admin = owned_created(ids["vendor"]["tx"], "::authority::AuthorityCap<")
@@ -459,54 +475,93 @@ def main():
     )
     cmds += call(f"{PERP}::registry::create_vendor_treasury_cap", [VK], obj(registry), "perp_vk", assign="treasury")
     cmds += call(f"{PERP}::registry::create_vendor_pause_guardian_cap", [VK], obj(registry), "perp_vk", assign="pauser")
-    cmds += call(f"{E2E}::mock_source::create", [ADMIN], obj(oracle_config), obj(oracle_pkg_admin), assign="src")
-    cmds += call(f"{E2E}::mock_source::authorize", [ADMIN], "src", obj(oracle_config), obj(oracle_pkg_admin))
+    cmds += call(f"{SIGNED}::source::create", [ADMIN], obj(oracle_config), obj(oracle_pkg_admin), assign="src")
+    cmds += call(f"{SIGNED}::source::authorize", [ADMIN], "src", obj(oracle_config), obj(oracle_pkg_admin))
+    cmds += call(
+        f"{SIGNED}::source::set_signer",
+        [ADMIN],
+        "src",
+        obj(oracle_config),
+        obj(oracle_pkg_admin),
+        vec_u8(ORACLE_SIGNER),
+        u64(U64_MAX),
+        CLOCK,
+    )
     cmds += call(
         f"{ORACLE}::price_feed_storage::new", [VK, ADMIN], obj(oracle_config), "oracle_vk", "'BTC/USD'", assign="pfs_btc"
     )
     cmds += call(
         f"{ORACLE}::price_feed_storage::new", [VK, ADMIN], obj(oracle_config), "oracle_vk", "'TUSD/USD'", assign="pfs_tusd"
     )
-    # A 1 ms TWAP window makes the feed TWAP follow the spot price between transactions.
-    cmds += call(
-        f"{E2E}::mock_source::new_price_feed",
-        [VK, ADMIN],
-        "src",
-        "oracle_vk",
-        obj(oracle_config),
-        "pfs_btc",
-        u128(BTC0),
-        u64(1),
-        CLOCK,
-    )
-    cmds += call(
-        f"{E2E}::mock_source::new_price_feed",
-        [VK, ADMIN],
-        "src",
-        "oracle_vk",
-        obj(oracle_config),
-        "pfs_tusd",
-        u128(ONE),
-        u64(1),
-        CLOCK,
-    )
     cmds += ["--make-move-vec", f"<{ORACLE}::price_feed_storage::PriceFeedStorage>", "[pfs_btc, pfs_tusd]", "--assign", "pfs_vec"]
     cmds += call(f"{ORACLE}::price_feed_storage::share_vec", [], "pfs_vec")
     cmds += ["--transfer-objects", "[meta, oracle_vk, perp_vk, treasury, pauser, src]", obj(me)]
-    j = ptb("vendor registration, oracle source and price feeds", cmds)
+    j = ptb("vendor registration, oracle source and price feed storages", cmds)
 
     source_id = int(events(j, "::events::CreatedSource")[0]["source_id"])
     storages = {e["symbol"]: e for e in events(j, "::events::CreatedPriceFeedStorage")}
     check("oracle vendor registered", len(events(j, "::events::RegisteredVendor")) == 2)
     check("two price feed storages created", set(storages) == {"BTC/USD", "TUSD/USD"})
-    check("two price feeds created", len(events(j, "::events::CreatedPriceFeed")) == 2)
     pfs_btc = storages["BTC/USD"]["price_feed_storage_obj_id"]
     pfs_tusd = storages["TUSD/USD"]["price_feed_storage_obj_id"]
+    storage_id = {pfs_btc: int(storages["BTC/USD"]["storage_id"]), pfs_tusd: int(storages["TUSD/USD"]["storage_id"])}
     oracle_vk = owned_created(j, f"AuthorityCap<{ORACLE}::authority::VENDOR<")
     perp_vk = owned_created(j, f"AuthorityCap<{PERP}::authority::VENDOR<{VK}>, {ADMIN}>")
     perp_treasury = owned_created(j, f"{PERP}::authority::TREASURY>")
     perp_pauser = owned_created(j, f"{PERP}::authority::PAUSE_GUARDIAN>")
     source = owned_created(j, "::source::Source<")
+    check("the signer is registered on the source", len(events(j, "::events::SetSigner")) == 1)
+
+    last_signed_ms = [0]
+
+    def signed_price(pfs, price):
+        """Arguments of a price update of `pfs` signed now: price, confidence, timestamp, key, signature.
+
+        The signature covers the source object and the feed, so it can only be made once both
+        exist. Timestamps are strictly increasing because the feed skips an update that is not
+        newer than the stored one.
+        """
+        timestamp_ms = max(int(time.time() * 1000), last_signed_ms[0] + 1)
+        last_signed_ms[0] = timestamp_ms
+        signature = oracle_signing.sign_price_update(
+            ORACLE_SIGNER_SEED, source, storage_id[pfs], price, 0, timestamp_ms
+        )
+        return [u128(price), u128(0), u64(timestamp_ms), vec_u8(ORACLE_SIGNER), vec_u8(signature)]
+
+    # A 1 ms TWAP window makes the feed TWAP follow the spot price between transactions.
+    cmds = []
+    for pfs, price in ((pfs_btc, BTC0), (pfs_tusd, ONE)):
+        cmds += call(
+            f"{SIGNED}::price_feed_storage::new_price_feed",
+            [VK, ADMIN],
+            obj(source),
+            obj(oracle_vk),
+            obj(oracle_config),
+            obj(pfs),
+            *signed_price(pfs, price),
+            u64(1),
+            CLOCK,
+        )
+    j = ptb("signed price feeds", cmds)
+    check("two price feeds created", len(events(j, "::events::CreatedPriceFeed")) == 2)
+
+    # Anyone may relay an update, so the signature is all that stands behind the price.
+    tampered = signed_price(pfs_btc, BTC0)
+    tampered[0] = u128(BTC0 + 1)
+    ptb(
+        "a relayed update whose price was changed after signing",
+        call(
+            f"{SIGNED}::price_feed_storage::update_price_feed",
+            [],
+            obj(source),
+            obj(oracle_config),
+            obj(pfs_btc),
+            *tampered,
+            CLOCK,
+        ),
+        expect_abort=("price_feed_storage", 2),
+    )
+
     w.state = dict(
         registry=registry,
         pfs_btc=pfs_btc,
@@ -632,23 +687,18 @@ def main():
     btc_price = [BTC0]
 
     def refresh_prices():
-        return call(
-            f"{E2E}::mock_source::set_price",
-            [],
-            obj(source),
-            obj(oracle_config),
-            obj(pfs_btc),
-            u128(btc_price[0]),
-            CLOCK,
-        ) + call(
-            f"{E2E}::mock_source::set_price",
-            [],
-            obj(source),
-            obj(oracle_config),
-            obj(pfs_tusd),
-            u128(ONE),
-            CLOCK,
-        )
+        cmds = []
+        for pfs, price in ((pfs_btc, btc_price[0]), (pfs_tusd, ONE)):
+            cmds += call(
+                f"{SIGNED}::price_feed_storage::update_price_feed",
+                [],
+                obj(source),
+                obj(oracle_config),
+                obj(pfs),
+                *signed_price(pfs, price),
+                CLOCK,
+            )
+        return cmds
 
     def no_integrator():
         # Option<IntegratorInfo> is not a pure type, so `none` has to come from a Move call.
