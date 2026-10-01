@@ -487,6 +487,18 @@ def main():
         u64(U64_MAX),
         CLOCK,
     )
+    # The suite moves prices by hand, by tens of percent between two transactions, so the default
+    # step limit is opened up; the limit itself is checked on its own below.
+    cmds += call(
+        f"{SIGNED}::source::set_default_step_limit",
+        [ADMIN],
+        "src",
+        obj(oracle_config),
+        obj(oracle_pkg_admin),
+        u64(10_000),
+        u64(0),
+        u64(10_000),
+    )
     cmds += call(
         f"{ORACLE}::price_feed_storage::new", [VK, ADMIN], obj(oracle_config), "oracle_vk", "'BTC/USD'", assign="pfs_btc"
     )
@@ -561,6 +573,57 @@ def main():
         ),
         expect_abort=("price_feed_storage", 2),
     )
+
+    # Step limit. The collateral is worth its quote by construction, so its feed is pinned: a
+    # signed price other than the stored one is refused, the same price again is taken.
+    def update(pfs, price):
+        return call(
+            f"{SIGNED}::price_feed_storage::update_price_feed",
+            [],
+            obj(source),
+            obj(oracle_config),
+            obj(pfs),
+            *signed_price(pfs, price),
+            CLOCK,
+        )
+
+    def set_step_limit(pfs, base_bps, bps_per_second, max_bps):
+        return call(
+            f"{SIGNED}::source::set_step_limit",
+            [ADMIN],
+            obj(source),
+            obj(oracle_config),
+            obj(oracle_pkg_admin),
+            f"{storage_id[pfs]}u32",
+            u64(base_bps),
+            u64(bps_per_second),
+            u64(max_bps),
+        )
+
+    j = ptb("pin the collateral feed", set_step_limit(pfs_tusd, 0, 0, 0))
+    check("the collateral feed's step limit is set", len(events(j, "::events::SetStepLimit")) == 1)
+    ptb("a signed collateral price of 1.01", update(pfs_tusd, ONE + ONE // 100), expect_abort=("price_feed_storage", 6))
+    j = ptb("the collateral price signed again at 1", update(pfs_tusd, ONE))
+    check("the pinned feed takes its own price again", len(events(j, "::events::UpdatedPriceFeed")) == 1)
+
+    # With the limit a deployment would use (0.5% at once, 0.5% per second, 20% at most), a
+    # signed price 30% away is refused however the transaction is timed. The stored price is
+    # left alone, so that the market below starts with its TWAP at the index; the feed then
+    # goes back to the suite's open default.
+    ptb("the deployment step limit on the BTC feed", set_step_limit(pfs_btc, 50, 50, 2_000))
+    ptb("a signed BTC price 30% up", update(pfs_btc, BTC0 * 13 // 10), expect_abort=("price_feed_storage", 6))
+    j = ptb(
+        "back to the open default",
+        call(
+            f"{SIGNED}::source::remove_step_limit",
+            [ADMIN],
+            obj(source),
+            obj(oracle_config),
+            obj(oracle_pkg_admin),
+            f"{storage_id[pfs_btc]}u32",
+        ),
+    )
+    check("the BTC feed's own limit is removed", len(events(j, "::events::RemovedStepLimit")) == 1)
 
     w.state = dict(
         registry=registry,
