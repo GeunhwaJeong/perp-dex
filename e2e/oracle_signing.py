@@ -147,6 +147,18 @@ FIXTURES = [
     ("TOO_FAR_AHEAD", FIXTURE_SIGNER_SEED, 0, 68_000 * ONE, 10 * ONE, 1_013_001),
     ("OTHER_FEED", FIXTURE_SIGNER_SEED, 1, 2_000 * ONE, 1 * ONE, 1_000_000),
     ("OTHER_SIGNER", FIXTURE_OTHER_SEED, 0, 68_500 * ONE, 10 * ONE, 1_005_000),
+    # Step limit, from 68,000 at 1,000,000 ms: one second later the default allows 1%.
+    ("STEP_UP_AT_LIMIT", FIXTURE_SIGNER_SEED, 0, 68_680 * ONE, 10 * ONE, 1_001_000),
+    ("STEP_UP_OVER", FIXTURE_SIGNER_SEED, 0, 68_680 * ONE + 1, 10 * ONE, 1_001_000),
+    ("STEP_DOWN_AT_LIMIT", FIXTURE_SIGNER_SEED, 0, 67_320 * ONE, 10 * ONE, 1_001_000),
+    ("STEP_DOWN_OVER", FIXTURE_SIGNER_SEED, 0, 67_320 * ONE - 1, 10 * ONE, 1_001_000),
+    # Half a second later the default allows 0.75%, which is 68,510.
+    ("STEP_HALF_SECOND", FIXTURE_SIGNER_SEED, 0, 68_511 * ONE, 10 * ONE, 1_000_500),
+    # A hundred seconds later the allowance has reached its maximum of 20%.
+    ("STEP_AT_MAX", FIXTURE_SIGNER_SEED, 0, 81_600 * ONE, 10 * ONE, 1_100_000),
+    ("STEP_OVER_MAX", FIXTURE_SIGNER_SEED, 0, 81_600 * ONE + 1, 10 * ONE, 1_100_000),
+    # Far from the stored price, but older than it.
+    ("OLD_AND_FAR", FIXTURE_SIGNER_SEED, 0, 1 * ONE, 0, 999_000),
 ]
 
 

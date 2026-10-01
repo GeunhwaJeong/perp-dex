@@ -53,6 +53,23 @@ const SIG_TOO_FAR_AHEAD: vector<u8> = x"e4ecc40fa382e11d324b98738aa96a2d63353a6a
 const SIG_OTHER_FEED: vector<u8> = x"9d48e4adb6d91bf9171b2f8c7ff8ae22b55a8a93f6537146b2d478a580297479209a9ab4f084ede820645037b5b5db63a2e416b78ae76597c87e7837db43c30c";
 /// Feed 0: 68,500 +/- 10 at 1,005,000 ms, signed by `OTHER_SIGNER`.
 const SIG_OTHER_SIGNER: vector<u8> = x"a20e7a0b74f33394d664789df422886017f9c3f41c7ed9fba416c602c730404a0c9fecdbdbfd579e4b62e6de1447b70a543c9355cc901bb794ea79e71f31f806";
+/// Feed 0: 68,680 +/- 10 at 1,001,000 ms, 1% above the first price one second after it.
+const SIG_STEP_UP_AT_LIMIT: vector<u8> = x"53ee1502fa81a6e9e1f9689438d4b2e779e1f2aa0266e8ef1728d6022b667037abc2d7b736698cc8ea2cde6d74a7ce3a8193410b35d003fc5d0047f12b588d00";
+/// Feed 0: one unit above that.
+const SIG_STEP_UP_OVER: vector<u8> = x"938e6e6cc195f27f3a68efa1d91e44c327b94ccc32f02081e2b6dc2105d03c75f6717458dc6f7f3199d8b00cbff52bf12eea263940c767aaf4190282728ecb0a";
+/// Feed 0: 67,320 +/- 10 at 1,001,000 ms, 1% below the first price.
+const SIG_STEP_DOWN_AT_LIMIT: vector<u8> = x"e2c9c4c47a78823b201656b58474a9fc4745c2ec280654bcbed92a04888430620ef36f3e39a0fb91bbe5f4a7c95c63d4c8aa21096ff82f991e9895a255c48e05";
+/// Feed 0: one unit below that.
+const SIG_STEP_DOWN_OVER: vector<u8> = x"bbf5b4d1f821c3b447332900f2bcf847a5b2714d82b4247aaba837dbe71634c81d82218529ee65f93d54cf3ecbcf87d4798c911f0e1be1da9e125b93c396c804";
+/// Feed 0: 68,511 +/- 10 at 1,000,500 ms, just over 0.75% above the first price half a second
+/// after it.
+const SIG_STEP_HALF_SECOND: vector<u8> = x"92c1985b65f496c03f76d21b129076ea2c820efd2eb89a1c6666916a86defaf164efeeacb0f4f28062b4dca8edfe55f651a1fb4b9da9bfad70588ba2076dc70d";
+/// Feed 0: 81,600 +/- 10 at 1,100,000 ms, 20% above the first price.
+const SIG_STEP_AT_MAX: vector<u8> = x"b16a0f92673942d6a88015107f519f06950b4303bf25b88ae0ab81eb27e710884529a1e669f731852b099551deddb143b2e1e7db587e7d12ded5435b5d011e0e";
+/// Feed 0: one unit above that.
+const SIG_STEP_OVER_MAX: vector<u8> = x"48d88ab0a45c5b2904b2b812dcb2a5929c4560015e0817333d62e154425b732e282023bfbeac5d873cf03364ad5eaf82ae51b0df9af31a3338d51537b0d58600";
+/// Feed 0: a price of 1 at 999,000 ms, before the first price.
+const SIG_OLD_AND_FAR: vector<u8> = x"ebb2dc3f5a0f440432d75e94af647570a8d70973c718b6faca75a554b803df5c183e6220e571361e152729786afae175e2d6abc5d3df2fef527acbfe56c64b05";
 
 public struct VK has drop {}
 
@@ -585,6 +602,254 @@ fun the_drift_bound_is_at_most_a_minute() {
     let (mut sc, mut fx) = setup();
     with_config!(&mut sc, &mut fx, |config, fx| {
         signed_source::set_max_future_drift_ms(&mut fx.source, config, &fx.oracle_admin, 60_001);
+    });
+    finish(sc, fx);
+}
+
+// === Step limit ===
+
+#[test]
+fun the_default_step_limit_grows_with_the_time_since_the_stored_price() {
+    let (sc, fx) = setup();
+    let limit = signed_source::step_limit(&fx.source, 0);
+    assert!(limit.base_bps() == 50 && limit.bps_per_second() == 50 && limit.max_bps() == 2_000);
+    assert!(!signed_source::has_own_step_limit(&fx.source, 0));
+    let stored = 68_000 * ONE;
+    // 0.5% at once.
+    assert!(limit.allows(stored, 68_340 * ONE, 0));
+    assert!(!limit.allows(stored, 68_340 * ONE + 1, 0));
+    // Every millisecond adds a thousandth of the per-second rate: 0.5005% after one.
+    assert!(limit.allows(stored, 68_340_340 * ONE / 1_000, 1));
+    assert!(!limit.allows(stored, 68_340_340 * ONE / 1_000 + 1, 1));
+    // 2% after three seconds, the pace of the price service.
+    assert!(limit.allows(stored, 69_360 * ONE, 3_000));
+    assert!(!limit.allows(stored, 69_360 * ONE + 1, 3_000));
+    // The maximum of 20% is reached after 39 seconds and holds from then on.
+    assert!(limit.allows(stored, 81_600 * ONE, 39_000));
+    assert!(!limit.allows(stored, 81_600 * ONE + 1, 39_000));
+    assert!(!limit.allows(stored, 81_600 * ONE + 1, 18_446_744_073_709_551_615));
+    // Downward the same, in basis points of the stored price.
+    assert!(limit.allows(stored, 54_400 * ONE, 39_000));
+    assert!(!limit.allows(stored, 54_400 * ONE - 1, 39_000));
+    assert!(limit.allows(stored, stored, 0));
+    finish(sc, fx);
+}
+
+#[test]
+fun an_update_at_the_step_limit_is_accepted_upward() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    fx.clock.set_for_testing(1_001_000);
+    update_btc(&mut sc, &fx, 68_680 * ONE, 10 * ONE, 1_001_000, SIG_STEP_UP_AT_LIMIT);
+    let (price, _) = btc_price_and_timestamp_ms(&mut sc, &fx);
+    assert!(price == 68_680 * ONE);
+    finish(sc, fx);
+}
+
+#[test]
+fun an_update_at_the_step_limit_is_accepted_downward() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    fx.clock.set_for_testing(1_001_000);
+    update_btc(&mut sc, &fx, 67_320 * ONE, 10 * ONE, 1_001_000, SIG_STEP_DOWN_AT_LIMIT);
+    let (price, _) = btc_price_and_timestamp_ms(&mut sc, &fx);
+    assert!(price == 67_320 * ONE);
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = adapter::EStepTooLarge)]
+fun an_update_above_the_step_limit_is_refused() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    fx.clock.set_for_testing(1_001_000);
+    update_btc(&mut sc, &fx, 68_680 * ONE + 1, 10 * ONE, 1_001_000, SIG_STEP_UP_OVER);
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = adapter::EStepTooLarge)]
+fun an_update_below_the_step_limit_is_refused() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    fx.clock.set_for_testing(1_001_000);
+    update_btc(&mut sc, &fx, 67_320 * ONE - 1, 10 * ONE, 1_001_000, SIG_STEP_DOWN_OVER);
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = adapter::EStepTooLarge)]
+fun the_allowance_is_measured_from_the_signed_timestamps() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    // The chain clock is a second ahead, which would allow 1%, but the update is stamped half a
+    // second after the stored price: 68,511 is over the 0.5% + 0.25% (68,510) that allows.
+    fx.clock.set_for_testing(1_001_000);
+    update_btc(&mut sc, &fx, 68_511 * ONE, 10 * ONE, 1_000_500, SIG_STEP_HALF_SECOND);
+    finish(sc, fx);
+}
+
+#[test]
+fun the_step_limit_is_measured_from_the_latest_stored_price() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    fx.clock.set_for_testing(1_001_000);
+    update_btc(&mut sc, &fx, 68_680 * ONE, 10 * ONE, 1_001_000, SIG_STEP_UP_AT_LIMIT);
+    // From 68,680 four seconds earlier, 68,500 is a quarter of a percent away.
+    fx.clock.set_for_testing(1_005_000);
+    update_btc(&mut sc, &fx, 68_500 * ONE, 10 * ONE, 1_005_000, SIG_SECOND);
+    let (price, _) = btc_price_and_timestamp_ms(&mut sc, &fx);
+    assert!(price == 68_500 * ONE);
+    finish(sc, fx);
+}
+
+#[test]
+fun after_a_long_gap_the_allowance_stops_at_its_maximum() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    fx.clock.set_for_testing(1_100_000);
+    update_btc(&mut sc, &fx, 81_600 * ONE, 10 * ONE, 1_100_000, SIG_STEP_AT_MAX);
+    let (price, _) = btc_price_and_timestamp_ms(&mut sc, &fx);
+    assert!(price == 81_600 * ONE);
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = adapter::EStepTooLarge)]
+fun a_step_beyond_the_maximum_is_refused_however_long_the_gap() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    fx.clock.set_for_testing(1_100_000);
+    update_btc(&mut sc, &fx, 81_600 * ONE + 1, 10 * ONE, 1_100_000, SIG_STEP_OVER_MAX);
+    finish(sc, fx);
+}
+
+#[test]
+fun the_package_admin_can_force_a_step_beyond_the_maximum() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    fx.clock.set_for_testing(1_100_000);
+    with_storage!(&mut sc, &fx, fx.btc, |config, pfs| {
+        adapter::force_update_price_feed(
+            &fx.source, config, &fx.oracle_admin, pfs,
+            81_600 * ONE + 1, 10 * ONE, 1_100_000, SIGNER, SIG_STEP_OVER_MAX, &fx.clock,
+        );
+    });
+    let (price, timestamp_ms) = btc_price_and_timestamp_ms(&mut sc, &fx);
+    assert!(price == 81_600 * ONE + 1 && timestamp_ms == 1_100_000);
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = adapter::EInvalidSignature)]
+fun a_forced_update_still_needs_a_valid_signature() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    fx.clock.set_for_testing(1_100_000);
+    with_storage!(&mut sc, &fx, fx.btc, |config, pfs| {
+        adapter::force_update_price_feed(
+            &fx.source, config, &fx.oracle_admin, pfs,
+            90_000 * ONE, 10 * ONE, 1_100_000, SIGNER, SIG_STEP_OVER_MAX, &fx.clock,
+        );
+    });
+    finish(sc, fx);
+}
+
+#[test]
+fun an_older_update_is_skipped_however_far_its_price() {
+    let (mut sc, fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    // A late relay of an old price must not fail the transaction it is part of.
+    update_btc(&mut sc, &fx, ONE, 0, 999_000, SIG_OLD_AND_FAR);
+    let (price, timestamp_ms) = btc_price_and_timestamp_ms(&mut sc, &fx);
+    assert!(price == 68_000 * ONE && timestamp_ms == 1_000_000);
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = adapter::EStepTooLarge)]
+fun a_feed_pinned_with_a_zero_limit_refuses_any_other_price() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    with_config!(&mut sc, &mut fx, |config, fx| {
+        signed_source::set_step_limit(&mut fx.source, config, &fx.oracle_admin, 0, 0, 0, 0);
+    });
+    fx.clock.set_for_testing(1_005_000);
+    update_btc(&mut sc, &fx, 68_500 * ONE, 10 * ONE, 1_005_000, SIG_SECOND);
+    finish(sc, fx);
+}
+
+#[test]
+fun a_pinned_feed_still_takes_its_own_price_again() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    with_config!(&mut sc, &mut fx, |config, fx| {
+        signed_source::set_step_limit(&mut fx.source, config, &fx.oracle_admin, 0, 0, 0, 0);
+    });
+    assert!(signed_source::has_own_step_limit(&fx.source, 0));
+    // The other feed keeps the default.
+    assert!(signed_source::step_limit(&fx.source, 1).max_bps() == 2_000);
+    fx.clock.set_for_testing(1_010_000);
+    update_btc(&mut sc, &fx, 68_000 * ONE, 680 * ONE, 1_010_000, SIG_AT_BOUND);
+    let (price, timestamp_ms) = btc_price_and_timestamp_ms(&mut sc, &fx);
+    assert!(price == 68_000 * ONE && timestamp_ms == 1_010_000);
+    finish(sc, fx);
+}
+
+#[test]
+fun a_feeds_own_limit_overrides_the_default_until_it_is_removed() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    with_config!(&mut sc, &mut fx, |config, fx| {
+        signed_source::set_step_limit(&mut fx.source, config, &fx.oracle_admin, 0, 150, 0, 150);
+        // Setting it again replaces it.
+        signed_source::set_step_limit(&mut fx.source, config, &fx.oracle_admin, 0, 100, 0, 100);
+    });
+    let limit = signed_source::step_limit(&fx.source, 0);
+    assert!(limit.base_bps() == 100 && limit.bps_per_second() == 0 && limit.max_bps() == 100);
+    // 1% and one unit, which the default refuses one second after the stored price, is still
+    // refused; exactly 1% passes at once.
+    assert!(limit.allows(68_000 * ONE, 68_680 * ONE, 0));
+    assert!(!limit.allows(68_000 * ONE, 68_680 * ONE + 1, 1_000_000));
+    with_config!(&mut sc, &mut fx, |config, fx| {
+        signed_source::remove_step_limit(&mut fx.source, config, &fx.oracle_admin, 0);
+    });
+    assert!(!signed_source::has_own_step_limit(&fx.source, 0));
+    assert!(signed_source::step_limit(&fx.source, 0) == signed_source::default_step_limit(&fx.source));
+    finish(sc, fx);
+}
+
+#[test]
+fun a_wider_default_admits_the_larger_step() {
+    let (mut sc, mut fx) = setup();
+    create_btc_feed(&mut sc, &fx);
+    with_config!(&mut sc, &mut fx, |config, fx| {
+        signed_source::set_default_step_limit(&mut fx.source, config, &fx.oracle_admin, 200, 50, 2_000);
+    });
+    fx.clock.set_for_testing(1_001_000);
+    update_btc(&mut sc, &fx, 68_680 * ONE + 1, 10 * ONE, 1_001_000, SIG_STEP_UP_OVER);
+    let (price, _) = btc_price_and_timestamp_ms(&mut sc, &fx);
+    assert!(price == 68_680 * ONE + 1);
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = signed_source::EStepLimitNotFound)]
+fun removing_a_limit_the_feed_does_not_have_aborts() {
+    let (mut sc, mut fx) = setup();
+    with_config!(&mut sc, &mut fx, |config, fx| {
+        signed_source::remove_step_limit(&mut fx.source, config, &fx.oracle_admin, 0);
+    });
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = signed_source::EInvalidStepLimit)]
+fun a_step_limit_base_cannot_exceed_its_maximum() {
+    let (mut sc, mut fx) = setup();
+    with_config!(&mut sc, &mut fx, |config, fx| {
+        signed_source::set_step_limit(&mut fx.source, config, &fx.oracle_admin, 0, 101, 0, 100);
+    });
+    finish(sc, fx);
+}
+
+#[test, expected_failure(abort_code = signed_source::EInvalidStepLimit)]
+fun a_step_limit_maximum_cannot_exceed_the_whole_price() {
+    let (mut sc, mut fx) = setup();
+    with_config!(&mut sc, &mut fx, |config, fx| {
+        signed_source::set_default_step_limit(&mut fx.source, config, &fx.oracle_admin, 0, 0, 10_001);
     });
     finish(sc, fx);
 }
