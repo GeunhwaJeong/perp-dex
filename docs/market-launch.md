@@ -53,11 +53,21 @@ public key with an expiry (`source::set_signer`; `remove_signer` drops a key at 
 `PriceFeedStorage` per priced asset (`price_feed_storage::new`) and add the source's feed to each
 through `oracle_haneul::price_feed_storage::new_price_feed`, which takes a signed price like any
 update. A signature covers the source object and the storage id, so prices can only be signed
-once both exist. `oracle_pyth` adds a Pyth feed the same way from a `PriceInfoObject`. The market
+once both exist; the price service serves them without a relayer key for this purpose. A feed
+starts at the price it is created with, so create it from a real one: with the default step
+limit a placeholder would lock the feed out of the market price. `oracle_pyth` adds a Pyth feed
+the same way from a `PriceInfoObject`. The market
 needs one storage for the base asset and one for the collateral, both with the source id it will
 be created with.
 A price pusher must keep the feeds fresher than the market's oracle tolerance (10 s for the base
 feed and 30 s for the collateral by default) or every session aborts with `EBadIndexPrice`.
+
+Set the step limits before the first market opens. The default (0.5% at once plus 0.5% per second
+since the stored price, 20% at most) suits a liquid asset and applies to every feed without a
+limit of its own; `source::set_step_limit` sets one per storage id. Pin a collateral that is
+worth its quote by construction with all zeros, so that its feed takes no other price. A signed
+price beyond the limit is refused and leaves the feed stale; once the gap exceeds the maximum,
+only `price_feed_storage::force_update_price_feed` with the package admin cap lets one through.
 
 ## 4. Market creation
 
@@ -106,7 +116,7 @@ Liquidations add the insurance fee share of every liquidated notional to it.
 
 | Operator | Calls | Why |
 |---|---|---|
-| Price signer and relayer | `oracle_haneul::price_feed_storage::update_price_feed` | Freshness within the tolerance. The signer signs (source, storage id, 18-decimal price, confidence, millisecond timestamp); anyone may relay it, so the front end can put the update in the trader's own transaction and a relayer only has to cover the gaps. An update that is not newer than the stored price is skipped. One whose confidence interval exceeds the source's bound (`set_max_confidence_bps`, 1% by default), or whose timestamp is ahead of the chain clock by more than `set_max_future_drift_ms` (3 s by default), aborts and leaves the feed stale, so markets stop rather than trade on an uncertain price |
+| Price signer and relayer | `oracle_haneul::price_feed_storage::update_price_feed` | Freshness within the tolerance. The signer signs (source, storage id, 18-decimal price, confidence, millisecond timestamp); anyone may relay it, so the front end can put the update in the trader's own transaction and a relayer only has to cover the gaps. An update that is not newer than the stored price is skipped. One whose confidence interval exceeds the source's bound (`set_max_confidence_bps`, 1% by default), whose timestamp is ahead of the chain clock by more than `set_max_future_drift_ms` (3 s by default), or whose price is beyond the feed's step limit, aborts and leaves the feed stale, so markets stop rather than trade on an uncertain price |
 | Pyth price pusher (if a market reads the Pyth source) | `oracle_pyth::price_feed_storage::update_price_feed` | Freshness within the tolerance. A push whose Pyth confidence interval exceeds the source's bound (`set_max_confidence_bps`, 1% by default) aborts and leaves the feed stale, so markets stop rather than trade on an uncertain price; the pusher retries on the next update |
 | Funding cranker | `clearing_house::update_funding` | Funding and premium TWAPs only advance when something touches the market |
 | Liquidator | `liquidate` inside a session | Positions below the maintenance margin |
